@@ -3,7 +3,8 @@
 # Doi server: .\run_all.ps1 -Server "localhost\SQLEXPRESS"
 param([string]$Server = "localhost")
 
-$scripts = '01_create_tables', '02_views_functions', '03_procedures_triggers', '04_sample_data'
+# 06 (backup) va 07 (demo transaction) chay tay trong SSMS, khong nam o day
+$scripts = '01_create_tables', '02_views_functions', '03_procedures_triggers', '04_sample_data', '05_security'
 foreach ($s in $scripts) {
     Write-Host "== $s.sql"
     sqlcmd -S $Server -E -C -b -f 65001 -i (Join-Path $PSScriptRoot "$s.sql")

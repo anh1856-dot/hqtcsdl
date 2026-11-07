@@ -36,6 +36,19 @@ INSERT INTO dbo.Users (RoleId, FullName, Email, Phone, PasswordHash, Address) VA
 (3, N'Đỗ Ngọc Dung',      'dung.do@example.test',        '0944444444', 'CHANGE_ME_BCRYPT_HASH', N'9 Phan Xích Long, Phú Nhuận, TP.HCM'),
 (3, N'Vũ Quốc Em',        'em.vu@example.test',          '0955555555', 'CHANGE_ME_BCRYPT_HASH', NULL);
 
+/* ---------- Cau hinh thong bao (UC35) ---------- */
+INSERT INTO dbo.NotificationSettings (Type, DisplayName, UpdatedBy) VALUES
+('Alert',        N'Cảnh báo môi trường',      1),
+('Progress',     N'Tiến độ sinh trưởng',      1),
+('HarvestReady', N'Sẵn sàng / đã thu hoạch',  1),
+('Rental',       N'Thuê khay',                1),
+('Delivery',     N'Giao nhận',                1),
+('System',       N'Thông báo hệ thống',       1);
+
+-- Khach Phạm Thu Bình tat thong bao tien do (chi nhan canh bao, thu hoach...)
+INSERT INTO dbo.UserNotificationPrefs (UserId, Type, IsEnabled)
+SELECT UserId, 'Progress', 0 FROM dbo.Users WHERE Email = 'binh.pham@example.test';
+
 /* ---------- Loai nam ---------- */
 INSERT INTO dbo.MushroomTypes (TypeName, GrowthDays, ExpectedYieldKg, Description) VALUES
 (N'Nấm bào ngư',  28, 1.20, N'Dễ trồng, chu kỳ ngắn, ưa ẩm cao'),

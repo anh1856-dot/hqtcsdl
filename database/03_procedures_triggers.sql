@@ -623,6 +623,51 @@ BEGIN
 END;
 GO
 
+-- UC35: Admin bat/tat 1 loai thong bao cho toan he thong
+CREATE OR ALTER PROCEDURE dbo.usp_SetNotificationSetting
+    @Type      VARCHAR(20),
+    @IsEnabled BIT,
+    @AdminId   INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF ISNULL(dbo.fn_GetActiveUserRole(@AdminId), '') <> 'Admin'
+        THROW 50010, N'Chỉ Admin được cấu hình thông báo.', 1;
+
+    UPDATE dbo.NotificationSettings
+    SET IsEnabled = @IsEnabled, UpdatedBy = @AdminId, UpdatedAt = SYSDATETIME()
+    WHERE Type = @Type;
+
+    IF @@ROWCOUNT = 0
+        THROW 50035, N'Loại thông báo không tồn tại.', 1;
+END;
+GO
+
+-- Nguoi dung tu bat/tat 1 loai thong bao cho rieng minh
+CREATE OR ALTER PROCEDURE dbo.usp_SetUserNotificationPref
+    @UserId    INT,
+    @Type      VARCHAR(20),
+    @IsEnabled BIT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF dbo.fn_GetActiveUserRole(@UserId) IS NULL
+        THROW 50001, N'Tài khoản không tồn tại hoặc đã bị khóa.', 1;
+    IF NOT EXISTS (SELECT 1 FROM dbo.NotificationSettings WHERE Type = @Type)
+        THROW 50035, N'Loại thông báo không tồn tại.', 1;
+
+    MERGE dbo.UserNotificationPrefs AS t
+    USING (SELECT @UserId AS UserId, @Type AS Type) AS s
+       ON t.UserId = s.UserId AND t.Type = s.Type
+    WHEN MATCHED THEN
+        UPDATE SET IsEnabled = @IsEnabled, UpdatedAt = SYSDATETIME()
+    WHEN NOT MATCHED THEN
+        INSERT (UserId, Type, IsEnabled) VALUES (@UserId, @Type, @IsEnabled);
+END;
+GO
+
 /* =====================================================================
    4. BAO CAO
    ===================================================================== */
@@ -787,6 +832,28 @@ BEGIN
     JOIN inserted i  ON i.CommandId = c.CommandId
     JOIN dbo.Devices d ON d.DeviceId = c.DeviceId
     WHERE d.IsSimulated = 1;
+END;
+GO
+
+-- UC35: Loc thong bao theo cau hinh truoc khi luu.
+--   - Loai bi Admin tat toan he thong: khong gui cho ai
+--   - Nguoi dung tu tat loai do: khong gui cho nguoi do
+--   - Ngoai le: canh bao moi truong (Alert) luon gui cho Admin/Operator
+CREATE OR ALTER TRIGGER dbo.trg_Notifications_InsteadOfInsert
+ON dbo.Notifications
+INSTEAD OF INSERT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    INSERT INTO dbo.Notifications (UserId, Type, Title, Content, AlertId, TrayId, IsRead, CreatedAt)
+    SELECT i.UserId, i.Type, i.Title, i.Content, i.AlertId, i.TrayId,
+           ISNULL(i.IsRead, 0), ISNULL(i.CreatedAt, SYSDATETIME())
+    FROM inserted i
+    LEFT JOIN dbo.NotificationSettings s  ON s.Type = i.Type
+    LEFT JOIN dbo.UserNotificationPrefs p ON p.UserId = i.UserId AND p.Type = i.Type
+    WHERE (i.Type = 'Alert' AND dbo.fn_GetActiveUserRole(i.UserId) IN ('Admin', 'Operator'))
+       OR (ISNULL(s.IsEnabled, 1) = 1 AND ISNULL(p.IsEnabled, 1) = 1);
 END;
 GO
 
