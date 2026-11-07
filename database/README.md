@@ -19,20 +19,24 @@ Cơ sở dữ liệu cho hệ thống quản lý nuôi trồng nấm thông minh
 
 **Cách 2 – SSMS:** mở `MushroomFarmDB_full.sql`, bấm **F5**.
 
-> ⚠ Cả hai cách đều **xoá và tạo lại toàn bộ bảng** trong `MushroomFarmDB` (database khác không bị ảnh hưởng).
+> ⚠ Cả hai cách đều **xoá và tạo lại toàn bộ bảng** trong `MushroomFarmDB` (database khác không bị ảnh hưởng). Cần chạy bằng tài khoản có quyền `sysadmin` (Windows Authentication với tài khoản đã cài SQL Server là được) vì có tạo login.
 
 ## Các file
 
 | File | Nội dung |
 |---|---|
-| `01_create_tables.sql` | Tạo database, 18 bảng, khoá, ràng buộc, index |
+| `01_create_tables.sql` | Tạo database, 20 bảng, khoá, ràng buộc, index |
 | `02_views_functions.sql` | View và function |
 | `03_procedures_triggers.sql` | Stored procedure và trigger (nghiệp vụ chính) |
 | `04_sample_data.sql` | Dữ liệu mẫu (chạy các procedure để tạo đơn thuê, trồng, thu hoạch, dữ liệu cảm biến) |
-| `run_all.ps1` | Chạy 01 → 04 theo thứ tự |
-| `MushroomFarmDB_full.sql` | Bản gộp 4 file để xem / nộp bài |
+| `05_security.sql` | Phân quyền: login, user, role, `GRANT`/`DENY` + tự kiểm tra quyền |
+| `06_backup_restore.sql` | Demo backup FULL/DIFF/LOG và khôi phục đến thời điểm trước sự cố (**chạy tay**) |
+| `07_demo_transactions.sql` | Demo 2 khách thuê đồng thời, dirty read, deadlock (**chạy từng đoạn ở 2 cửa sổ**) |
+| `run_all.ps1` | Chạy 01 → 05 theo thứ tự |
+| `build_full.ps1` | Gộp 01 → 05 thành `MushroomFarmDB_full.sql` |
+| `MushroomFarmDB_full.sql` | Bản gộp để xem / nộp bài |
 
-**Sửa code thì sửa trong 4 file gốc**, không sửa file gộp. Chỉ sửa procedure/view: chạy lại riêng file 02 hoặc 03 (dùng `CREATE OR ALTER`, không mất dữ liệu).
+**Sửa code thì sửa trong các file gốc**, không sửa file gộp; sửa xong chạy `.\build_full.ps1`. Chỉ sửa procedure/view: chạy lại riêng file 02 hoặc 03 (dùng `CREATE OR ALTER`, không mất dữ liệu). Chạy lại file 01 thì phải chạy lại cả 02 → 05 (dùng `run_all.ps1`).
 
 ## Các bảng
 
@@ -42,7 +46,7 @@ Cơ sở dữ liệu cho hệ thống quản lý nuôi trồng nấm thông minh
 | Phòng, khay | `Rooms`, `MushroomTypes`, `Trays` |
 | Cho thuê | `RentalPackages`, `Rentals`, `RentalTrays`, `Payments` |
 | IoT | `Devices`, `SensorReadings`, `EnvThresholds`, `DeviceCommands` |
-| Cảnh báo | `Alerts`, `Notifications` |
+| Cảnh báo, thông báo | `Alerts`, `Notifications`, `NotificationSettings`, `UserNotificationPrefs` |
 | Canh tác | `GrowthLogs`, `Harvests`, `DeliveryRequests` |
 
 ## Procedure cho backend
@@ -62,10 +66,39 @@ Cơ sở dữ liệu cho hệ thống quản lý nuôi trồng nấm thông minh
 | `usp_UpdateAlertStatus` | Xác nhận / xử lý cảnh báo |
 | `usp_CompleteExpiredRentals` | Đóng đơn thuê hết hạn (chạy định kỳ) |
 | `usp_RevenueReport` | Báo cáo doanh thu theo gói |
+| `usp_SetNotificationSetting` | Admin bật/tắt một loại thông báo cho toàn hệ thống |
+| `usp_SetUserNotificationPref` | Người dùng bật/tắt một loại thông báo cho riêng mình |
 
 Function/view hay dùng: `fn_GetCustomerTrays(@CustomerId)`, `vw_TrayOverview`, `vw_RoomLatestEnvironment`, `vw_DeviceStatus`, `vw_MonthlyRevenue`, `vw_HarvestSummary`.
 
-**Trigger** `trg_SensorReadings_AfterInsert`: khi có dữ liệu cảm biến mới, tự tạo cảnh báo nếu vượt ngưỡng, gửi thông báo cho Admin/Operator và khách có khay trong phòng, tự bật/tắt quạt – phun sương – sưởi; tự đóng cảnh báo khi chỉ số ổn định lại.
+**Trigger:**
+- `trg_SensorReadings_AfterInsert`: khi có dữ liệu cảm biến mới, tự tạo cảnh báo nếu vượt ngưỡng, gửi thông báo cho Admin/Operator và khách có khay trong phòng, tự bật/tắt quạt – phun sương – sưởi; tự đóng cảnh báo khi chỉ số ổn định lại.
+- `trg_Notifications_InsteadOfInsert`: lọc thông báo theo cấu hình (Admin tắt cả hệ thống / người dùng tự tắt); cảnh báo môi trường luôn gửi cho Admin/Operator.
+- `trg_DeviceCommands_AfterInsert`, `trg_Users_InsteadOfDelete` (xoá mềm), `trg_Trays_CheckRoomCapacity`.
+
+## Phân quyền (05_security.sql)
+
+| Login / user | Role | Được làm |
+|---|---|---|
+| `mushroom_app` | `rl_backend` | Đọc/thêm/sửa, gọi mọi procedure. **Không** sửa trực tiếp `Payments`, không thêm trực tiếp `Rentals`/`RentalTrays` (phải qua `usp_RentTrays`…), không sửa/xoá dữ liệu lịch sử (`SensorReadings`, `DeviceCommands`, `GrowthLogs`), không `ALTER`/`DROP` |
+| `mushroom_report` | `rl_report` | Chỉ `SELECT` các view báo cáo và gọi `usp_RevenueReport` |
+| `mushroom_iot` | `rl_iot` | Chỉ gọi `usp_InsertSensorReading`, `usp_SimulateSensorData` |
+
+Procedure vẫn ghi được vào bảng bị `DENY` nhờ **ownership chaining** (procedure và bảng cùng chủ sở hữu `dbo`) → backend bắt buộc đi qua procedure cho nghiệp vụ quan trọng. Cuối file có phần tự kiểm tra bằng `EXECUTE AS USER`.
+
+Mật khẩu các login nằm trong `05_security.sql` (**chỉ dùng cho máy dev**). Để backend đăng nhập bằng các login này, SQL Server phải bật **SQL Server and Windows Authentication mode** (SSMS: chuột phải server → Properties → Security), rồi khởi động lại dịch vụ SQL Server.
+
+## Backup / Restore (06_backup_restore.sql)
+
+Mở trong SSMS, bấm F5. Kịch bản: chuyển recovery model FULL → backup FULL → backup DIFF → "lỡ tay" đặt giá mọi gói thuê = 0 → backup LOG → kiểm tra file backup → khôi phục FULL + DIFF + LOG **đến thời điểm trước sự cố** (`STOPAT`) vào database mới `MushroomFarmDB_Restore` → lấy giá đúng sửa lại DB gốc.
+
+## Demo transaction (07_demo_transactions.sql)
+
+Không bấm F5 cả file. Mỗi demo mở 2 cửa sổ query, bôi đen đoạn "CỬA SỔ 1" → F5, rồi nhanh chóng sang cửa sổ kia chạy đoạn "CỬA SỔ 2":
+
+1. **Hai khách thuê cùng lúc**: cửa sổ 2 phải chờ cửa sổ 1, sau đó nhận khay khác (khoá `UPDLOCK, HOLDLOCK`)
+2. **Dirty read**: `READ UNCOMMITTED` đọc được giá chưa commit; `READ COMMITTED` phải chờ
+3. **Deadlock**: SQL Server huỷ một bên (lỗi 1205) + đoạn code bắt lỗi và thử lại
 
 ## Lưu ý cho backend
 

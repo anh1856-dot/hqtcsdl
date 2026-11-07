@@ -20,6 +20,8 @@ GO
 DROP TABLE IF EXISTS dbo.DeliveryRequests;
 DROP TABLE IF EXISTS dbo.Harvests;
 DROP TABLE IF EXISTS dbo.GrowthLogs;
+DROP TABLE IF EXISTS dbo.UserNotificationPrefs;
+DROP TABLE IF EXISTS dbo.NotificationSettings;
 DROP TABLE IF EXISTS dbo.Notifications;
 DROP TABLE IF EXISTS dbo.Alerts;
 DROP TABLE IF EXISTS dbo.DeviceCommands;
@@ -287,6 +289,26 @@ CREATE TABLE dbo.Notifications (
         ('Alert', 'Progress', 'HarvestReady', 'Rental', 'Delivery', 'System'))
 );
 CREATE INDEX IX_Notifications_User ON dbo.Notifications(UserId, IsRead, CreatedAt DESC);
+
+-- UC35: Admin bat/tat tung loai thong bao cho toan he thong
+CREATE TABLE dbo.NotificationSettings (
+    Type        VARCHAR(20)   NOT NULL CONSTRAINT PK_NotificationSettings PRIMARY KEY,
+    DisplayName NVARCHAR(100) NOT NULL,
+    IsEnabled   BIT           NOT NULL CONSTRAINT DF_NotificationSettings_IsEnabled DEFAULT 1,
+    UpdatedBy   INT           NULL CONSTRAINT FK_NotificationSettings_Users REFERENCES dbo.Users(UserId),
+    UpdatedAt   DATETIME2(0)  NOT NULL CONSTRAINT DF_NotificationSettings_UpdatedAt DEFAULT SYSDATETIME(),
+    CONSTRAINT CK_NotificationSettings_Type CHECK (Type IN
+        ('Alert', 'Progress', 'HarvestReady', 'Rental', 'Delivery', 'System'))
+);
+
+-- Nguoi dung tu tat loai thong bao khong muon nhan (khong co dong = dang bat)
+CREATE TABLE dbo.UserNotificationPrefs (
+    UserId    INT          NOT NULL CONSTRAINT FK_UserNotificationPrefs_Users REFERENCES dbo.Users(UserId),
+    Type      VARCHAR(20)  NOT NULL CONSTRAINT FK_UserNotificationPrefs_Settings REFERENCES dbo.NotificationSettings(Type),
+    IsEnabled BIT          NOT NULL,
+    UpdatedAt DATETIME2(0) NOT NULL CONSTRAINT DF_UserNotificationPrefs_UpdatedAt DEFAULT SYSDATETIME(),
+    CONSTRAINT PK_UserNotificationPrefs PRIMARY KEY (UserId, Type)
+);
 GO
 
 /* =====================================================================

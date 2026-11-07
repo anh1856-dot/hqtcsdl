@@ -1,4 +1,22 @@
-﻿SET ANSI_NULLS ON;
+﻿/* =====================================================================
+   MushroomFarmDB - FILE GOP DAY DU (tao tu dong boi build_full.ps1)
+   Gom: 01 -> 05. Khong gom 06 (backup) va 07 (demo, chay tung doan).
+   Chay ca file trong SSMS: bam F5. CANH BAO: xoa va tao lai toan bo bang
+   trong MushroomFarmDB (khong anh huong database khac).
+   Sua code thi sua o cac file goc, roi chay lai build_full.ps1.
+   ===================================================================== */
+
+/* #####################################################################
+   01_create_tables.sql
+   ##################################################################### */
+/* =====================================================================
+   MushroomFarmDB - He thong quan ly nuoi trong nam thong minh
+   01_create_tables.sql : Tao database, bang, rang buoc, index
+   Chay lai nhieu lan duoc: xoa bang cu (chi trong MushroomFarmDB) roi tao lai
+   ===================================================================== */
+
+-- Filtered index, trigger, procedure can 2 tuy chon nay (sqlcmd mac dinh tat QUOTED_IDENTIFIER)
+SET ANSI_NULLS ON;
 SET QUOTED_IDENTIFIER ON;
 GO
 
@@ -13,6 +31,8 @@ GO
 DROP TABLE IF EXISTS dbo.DeliveryRequests;
 DROP TABLE IF EXISTS dbo.Harvests;
 DROP TABLE IF EXISTS dbo.GrowthLogs;
+DROP TABLE IF EXISTS dbo.UserNotificationPrefs;
+DROP TABLE IF EXISTS dbo.NotificationSettings;
 DROP TABLE IF EXISTS dbo.Notifications;
 DROP TABLE IF EXISTS dbo.Alerts;
 DROP TABLE IF EXISTS dbo.DeviceCommands;
@@ -280,6 +300,26 @@ CREATE TABLE dbo.Notifications (
         ('Alert', 'Progress', 'HarvestReady', 'Rental', 'Delivery', 'System'))
 );
 CREATE INDEX IX_Notifications_User ON dbo.Notifications(UserId, IsRead, CreatedAt DESC);
+
+-- UC35: Admin bat/tat tung loai thong bao cho toan he thong
+CREATE TABLE dbo.NotificationSettings (
+    Type        VARCHAR(20)   NOT NULL CONSTRAINT PK_NotificationSettings PRIMARY KEY,
+    DisplayName NVARCHAR(100) NOT NULL,
+    IsEnabled   BIT           NOT NULL CONSTRAINT DF_NotificationSettings_IsEnabled DEFAULT 1,
+    UpdatedBy   INT           NULL CONSTRAINT FK_NotificationSettings_Users REFERENCES dbo.Users(UserId),
+    UpdatedAt   DATETIME2(0)  NOT NULL CONSTRAINT DF_NotificationSettings_UpdatedAt DEFAULT SYSDATETIME(),
+    CONSTRAINT CK_NotificationSettings_Type CHECK (Type IN
+        ('Alert', 'Progress', 'HarvestReady', 'Rental', 'Delivery', 'System'))
+);
+
+-- Nguoi dung tu tat loai thong bao khong muon nhan (khong co dong = dang bat)
+CREATE TABLE dbo.UserNotificationPrefs (
+    UserId    INT          NOT NULL CONSTRAINT FK_UserNotificationPrefs_Users REFERENCES dbo.Users(UserId),
+    Type      VARCHAR(20)  NOT NULL CONSTRAINT FK_UserNotificationPrefs_Settings REFERENCES dbo.NotificationSettings(Type),
+    IsEnabled BIT          NOT NULL,
+    UpdatedAt DATETIME2(0) NOT NULL CONSTRAINT DF_UserNotificationPrefs_UpdatedAt DEFAULT SYSDATETIME(),
+    CONSTRAINT PK_UserNotificationPrefs PRIMARY KEY (UserId, Type)
+);
 GO
 
 /* =====================================================================
@@ -1150,6 +1190,51 @@ BEGIN
 END;
 GO
 
+-- UC35: Admin bat/tat 1 loai thong bao cho toan he thong
+CREATE OR ALTER PROCEDURE dbo.usp_SetNotificationSetting
+    @Type      VARCHAR(20),
+    @IsEnabled BIT,
+    @AdminId   INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF ISNULL(dbo.fn_GetActiveUserRole(@AdminId), '') <> 'Admin'
+        THROW 50010, N'Chỉ Admin được cấu hình thông báo.', 1;
+
+    UPDATE dbo.NotificationSettings
+    SET IsEnabled = @IsEnabled, UpdatedBy = @AdminId, UpdatedAt = SYSDATETIME()
+    WHERE Type = @Type;
+
+    IF @@ROWCOUNT = 0
+        THROW 50035, N'Loại thông báo không tồn tại.', 1;
+END;
+GO
+
+-- Nguoi dung tu bat/tat 1 loai thong bao cho rieng minh
+CREATE OR ALTER PROCEDURE dbo.usp_SetUserNotificationPref
+    @UserId    INT,
+    @Type      VARCHAR(20),
+    @IsEnabled BIT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF dbo.fn_GetActiveUserRole(@UserId) IS NULL
+        THROW 50001, N'Tài khoản không tồn tại hoặc đã bị khóa.', 1;
+    IF NOT EXISTS (SELECT 1 FROM dbo.NotificationSettings WHERE Type = @Type)
+        THROW 50035, N'Loại thông báo không tồn tại.', 1;
+
+    MERGE dbo.UserNotificationPrefs AS t
+    USING (SELECT @UserId AS UserId, @Type AS Type) AS s
+       ON t.UserId = s.UserId AND t.Type = s.Type
+    WHEN MATCHED THEN
+        UPDATE SET IsEnabled = @IsEnabled, UpdatedAt = SYSDATETIME()
+    WHEN NOT MATCHED THEN
+        INSERT (UserId, Type, IsEnabled) VALUES (@UserId, @Type, @IsEnabled);
+END;
+GO
+
 /* =====================================================================
    4. BAO CAO
    ===================================================================== */
@@ -1317,6 +1402,28 @@ BEGIN
 END;
 GO
 
+-- UC35: Loc thong bao theo cau hinh truoc khi luu.
+--   - Loai bi Admin tat toan he thong: khong gui cho ai
+--   - Nguoi dung tu tat loai do: khong gui cho nguoi do
+--   - Ngoai le: canh bao moi truong (Alert) luon gui cho Admin/Operator
+CREATE OR ALTER TRIGGER dbo.trg_Notifications_InsteadOfInsert
+ON dbo.Notifications
+INSTEAD OF INSERT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    INSERT INTO dbo.Notifications (UserId, Type, Title, Content, AlertId, TrayId, IsRead, CreatedAt)
+    SELECT i.UserId, i.Type, i.Title, i.Content, i.AlertId, i.TrayId,
+           ISNULL(i.IsRead, 0), ISNULL(i.CreatedAt, SYSDATETIME())
+    FROM inserted i
+    LEFT JOIN dbo.NotificationSettings s  ON s.Type = i.Type
+    LEFT JOIN dbo.UserNotificationPrefs p ON p.UserId = i.UserId AND p.Type = i.Type
+    WHERE (i.Type = 'Alert' AND dbo.fn_GetActiveUserRole(i.UserId) IN ('Admin', 'Operator'))
+       OR (ISNULL(s.IsEnabled, 1) = 1 AND ISNULL(p.IsEnabled, 1) = 1);
+END;
+GO
+
 -- BR12: Xoa tai khoan = xoa mem (giu lich su thue, thanh toan)
 CREATE OR ALTER TRIGGER dbo.trg_Users_InsteadOfDelete
 ON dbo.Users
@@ -1393,6 +1500,19 @@ INSERT INTO dbo.Users (RoleId, FullName, Email, Phone, PasswordHash, Address) VA
 (3, N'Hoàng Gia Cường',   'cuong.hoang@example.test',    '0933333333', 'CHANGE_ME_BCRYPT_HASH', N'78 Võ Văn Ngân, Thủ Đức, TP.HCM'),
 (3, N'Đỗ Ngọc Dung',      'dung.do@example.test',        '0944444444', 'CHANGE_ME_BCRYPT_HASH', N'9 Phan Xích Long, Phú Nhuận, TP.HCM'),
 (3, N'Vũ Quốc Em',        'em.vu@example.test',          '0955555555', 'CHANGE_ME_BCRYPT_HASH', NULL);
+
+/* ---------- Cau hinh thong bao (UC35) ---------- */
+INSERT INTO dbo.NotificationSettings (Type, DisplayName, UpdatedBy) VALUES
+('Alert',        N'Cảnh báo môi trường',      1),
+('Progress',     N'Tiến độ sinh trưởng',      1),
+('HarvestReady', N'Sẵn sàng / đã thu hoạch',  1),
+('Rental',       N'Thuê khay',                1),
+('Delivery',     N'Giao nhận',                1),
+('System',       N'Thông báo hệ thống',       1);
+
+-- Khach Phạm Thu Bình tat thong bao tien do (chi nhan canh bao, thu hoach...)
+INSERT INTO dbo.UserNotificationPrefs (UserId, Type, IsEnabled)
+SELECT UserId, 'Progress', 0 FROM dbo.Users WHERE Email = 'binh.pham@example.test';
 
 /* ---------- Loai nam ---------- */
 INSERT INTO dbo.MushroomTypes (TypeName, GrowthDays, ExpectedYieldKg, Description) VALUES
@@ -1555,3 +1675,192 @@ GO
 SET NOEXEC OFF;
 GO
 PRINT N'04_sample_data.sql: xong';
+
+GO
+
+/* #####################################################################
+   05_security.sql
+   ##################################################################### */
+/* =====================================================================
+   MushroomFarmDB
+   05_security.sql : Phan quyen SQL Server (login, user, role, GRANT/DENY)
+   Chay sau 01 -> 04. Chay lai nhieu lan duoc.
+
+   3 tai khoan, moi tai khoan chi co dung quyen can thiet (least privilege):
+     mushroom_app    -> backend Node.js
+     mushroom_report -> chi xem bao cao
+     mushroom_iot    -> chuong trinh gia lap IoT, chi gui du lieu cam bien
+
+   LUU Y:
+   - Mat khau ben duoi chi dung cho moi truong dev tren may ca nhan. Doi lai
+     neu dua len server that.
+   - Muon dang nhap bang cac login nay, SQL Server phai bat che do
+     "SQL Server and Windows Authentication mode" (SSMS: chuot phai server
+     -> Properties -> Security), roi khoi dong lai dich vu SQL Server.
+   ===================================================================== */
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+SET NOCOUNT ON;
+GO
+
+/* =====================================================================
+   1. LOGIN (cap server)
+   ===================================================================== */
+USE master;
+GO
+DECLARE @Logins TABLE (LoginName SYSNAME, Pwd NVARCHAR(128));
+INSERT INTO @Logins VALUES
+(N'mushroom_app',    N'MushroomApp@Dev2026'),
+(N'mushroom_report', N'MushroomReport@Dev2026'),
+(N'mushroom_iot',    N'MushroomIoT@Dev2026');
+
+DECLARE @Name SYSNAME, @Pwd NVARCHAR(128), @Sql NVARCHAR(MAX);
+DECLARE cur CURSOR LOCAL FAST_FORWARD FOR SELECT LoginName, Pwd FROM @Logins;
+OPEN cur;
+FETCH NEXT FROM cur INTO @Name, @Pwd;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = @Name)
+    BEGIN
+        -- CREATE LOGIN khong nhan bien cho mat khau -> dung dynamic SQL
+        SET @Sql = N'CREATE LOGIN ' + QUOTENAME(@Name)
+                 + N' WITH PASSWORD = ' + QUOTENAME(@Pwd, '''')
+                 + N', DEFAULT_DATABASE = MushroomFarmDB, CHECK_POLICY = ON, CHECK_EXPIRATION = OFF;';
+        EXEC sys.sp_executesql @Sql;
+        PRINT CONCAT(N'Tao login ', @Name);
+    END;
+    FETCH NEXT FROM cur INTO @Name, @Pwd;
+END;
+CLOSE cur; DEALLOCATE cur;
+GO
+
+/* =====================================================================
+   2. USER va ROLE (cap database)
+   ===================================================================== */
+USE MushroomFarmDB;
+GO
+
+IF USER_ID(N'mushroom_app')    IS NULL CREATE USER mushroom_app    FOR LOGIN mushroom_app;
+IF USER_ID(N'mushroom_report') IS NULL CREATE USER mushroom_report FOR LOGIN mushroom_report;
+IF USER_ID(N'mushroom_iot')    IS NULL CREATE USER mushroom_iot    FOR LOGIN mushroom_iot;
+
+IF DATABASE_PRINCIPAL_ID(N'rl_backend') IS NULL CREATE ROLE rl_backend;
+IF DATABASE_PRINCIPAL_ID(N'rl_report')  IS NULL CREATE ROLE rl_report;
+IF DATABASE_PRINCIPAL_ID(N'rl_iot')     IS NULL CREATE ROLE rl_iot;
+
+IF IS_ROLEMEMBER(N'rl_backend', N'mushroom_app')    = 0 ALTER ROLE rl_backend ADD MEMBER mushroom_app;
+IF IS_ROLEMEMBER(N'rl_report',  N'mushroom_report') = 0 ALTER ROLE rl_report  ADD MEMBER mushroom_report;
+IF IS_ROLEMEMBER(N'rl_iot',     N'mushroom_iot')    = 0 ALTER ROLE rl_iot     ADD MEMBER mushroom_iot;
+GO
+
+/* =====================================================================
+   3. QUYEN CHO TUNG ROLE
+   ===================================================================== */
+
+/* ---------- rl_backend: backend ung dung ----------
+   Duoc doc/them/sua tren toan schema va goi moi procedure.
+   KHONG duoc ALTER/DROP bang (khong co quyen DDL).
+   Cac bang tien bac / lich su: DENY ghi truc tiep, bat buoc di qua procedure.
+   Procedure van chay duoc nho "ownership chaining": procedure va bang cung
+   chu so huu (dbo) nen SQL Server khong kiem tra quyen tren bang nua. */
+GRANT SELECT, INSERT, UPDATE, EXECUTE ON SCHEMA::dbo TO rl_backend;
+
+-- Chi duoc xoa o nhung bang it rui ro (Users co trigger xoa mem)
+GRANT DELETE ON dbo.Notifications         TO rl_backend;
+GRANT DELETE ON dbo.UserNotificationPrefs TO rl_backend;
+GRANT DELETE ON dbo.Users                 TO rl_backend;
+
+-- Thue khay, thanh toan: chi qua usp_RentTrays / usp_AssignTrayToCustomer
+DENY INSERT, UPDATE, DELETE ON dbo.Payments    TO rl_backend;
+DENY INSERT, DELETE         ON dbo.Rentals     TO rl_backend;
+DENY INSERT, DELETE         ON dbo.RentalTrays TO rl_backend;
+
+-- Du lieu lich su khong duoc sua / xoa (phuc vu truy vet)
+DENY UPDATE, DELETE ON dbo.SensorReadings TO rl_backend;
+DENY UPDATE, DELETE ON dbo.DeviceCommands TO rl_backend;
+DENY UPDATE, DELETE ON dbo.GrowthLogs     TO rl_backend;
+GO
+
+/* ---------- rl_report: chi xem bao cao ---------- */
+GRANT SELECT  ON dbo.vw_MonthlyRevenue        TO rl_report;
+GRANT SELECT  ON dbo.vw_HarvestSummary        TO rl_report;
+GRANT SELECT  ON dbo.vw_TrayOverview          TO rl_report;
+GRANT SELECT  ON dbo.vw_RoomLatestEnvironment TO rl_report;
+GRANT EXECUTE ON dbo.usp_RevenueReport        TO rl_report;
+GO
+
+/* ---------- rl_iot: chi gui du lieu cam bien ---------- */
+GRANT EXECUTE ON dbo.usp_InsertSensorReading TO rl_iot;
+GRANT EXECUTE ON dbo.usp_SimulateSensorData  TO rl_iot;
+GO
+
+/* =====================================================================
+   4. KIEM TRA QUYEN (EXECUTE AS = tam dong vai user, khong can dang nhap)
+   ===================================================================== */
+CREATE TABLE #Check (Seq INT IDENTITY, Who SYSNAME, Action NVARCHAR(100), Expected NVARCHAR(10), Result NVARCHAR(200));
+DECLARE @r NVARCHAR(200);
+
+-- rl_report
+EXECUTE AS USER = 'mushroom_report';
+BEGIN TRY DECLARE @x1 INT = (SELECT COUNT(*) FROM dbo.vw_MonthlyRevenue); SET @r = N'OK'; END TRY
+BEGIN CATCH SET @r = CONCAT(N'Bị chặn (', ERROR_NUMBER(), N')'); END CATCH;
+REVERT;
+INSERT #Check VALUES ('mushroom_report', N'SELECT vw_MonthlyRevenue', N'OK', @r);
+
+EXECUTE AS USER = 'mushroom_report';
+BEGIN TRY DECLARE @x2 INT = (SELECT COUNT(*) FROM dbo.Users); SET @r = N'OK'; END TRY
+BEGIN CATCH SET @r = CONCAT(N'Bị chặn (', ERROR_NUMBER(), N')'); END CATCH;
+REVERT;
+INSERT #Check VALUES ('mushroom_report', N'SELECT bảng Users', N'Bị chặn', @r);
+
+-- rl_iot
+EXECUTE AS USER = 'mushroom_iot';
+BEGIN TRY
+    BEGIN TRAN;
+    CREATE TABLE #R (ReadingId BIGINT);
+    INSERT #R EXEC dbo.usp_InsertSensorReading @DeviceCode = 'SEN-R01', @Temperature = 25, @Humidity = 88, @CO2 = 600;
+    ROLLBACK;
+    SET @r = N'OK';
+END TRY
+BEGIN CATCH IF @@TRANCOUNT > 0 ROLLBACK; SET @r = CONCAT(N'Bị chặn (', ERROR_NUMBER(), N')'); END CATCH;
+REVERT;
+INSERT #Check VALUES ('mushroom_iot', N'EXEC usp_InsertSensorReading', N'OK', @r);
+
+EXECUTE AS USER = 'mushroom_iot';
+BEGIN TRY DECLARE @x3 INT = (SELECT COUNT(*) FROM dbo.SensorReadings); SET @r = N'OK'; END TRY
+BEGIN CATCH SET @r = CONCAT(N'Bị chặn (', ERROR_NUMBER(), N')'); END CATCH;
+REVERT;
+INSERT #Check VALUES ('mushroom_iot', N'SELECT bảng SensorReadings', N'Bị chặn', @r);
+
+-- rl_backend
+EXECUTE AS USER = 'mushroom_app';
+BEGIN TRY BEGIN TRAN; UPDATE dbo.Payments SET Amount = 0; ROLLBACK; SET @r = N'OK'; END TRY
+BEGIN CATCH IF @@TRANCOUNT > 0 ROLLBACK; SET @r = CONCAT(N'Bị chặn (', ERROR_NUMBER(), N')'); END CATCH;
+REVERT;
+INSERT #Check VALUES ('mushroom_app', N'UPDATE trực tiếp bảng Payments', N'Bị chặn', @r);
+
+EXECUTE AS USER = 'mushroom_app';
+BEGIN TRY
+    BEGIN TRAN;
+    CREATE TABLE #T (TrayId INT, TrayCode VARCHAR(20), RoomName NVARCHAR(100));
+    INSERT #T EXEC dbo.usp_RentTrays @CustomerId = 8, @PackageId = 1, @TrayCount = 1;
+    ROLLBACK;
+    SET @r = N'OK';
+END TRY
+BEGIN CATCH IF @@TRANCOUNT > 0 ROLLBACK; SET @r = CONCAT(N'Bị chặn (', ERROR_NUMBER(), N')'); END CATCH;
+REVERT;
+INSERT #Check VALUES ('mushroom_app', N'EXEC usp_RentTrays (ghi Payments qua proc)', N'OK', @r);
+
+EXECUTE AS USER = 'mushroom_app';
+BEGIN TRY BEGIN TRAN; EXEC (N'DROP TABLE dbo.Alerts'); ROLLBACK; SET @r = N'OK'; END TRY
+BEGIN CATCH IF @@TRANCOUNT > 0 ROLLBACK; SET @r = CONCAT(N'Bị chặn (', ERROR_NUMBER(), N')'); END CATCH;
+REVERT;
+INSERT #Check VALUES ('mushroom_app', N'DROP TABLE Alerts', N'Bị chặn', @r);
+
+SELECT Who, Action, Expected, Result,
+       CASE WHEN LEFT(Result, 2) = LEFT(Expected, 2) THEN N'✔' ELSE N'✘ SAI' END AS Pass
+FROM #Check ORDER BY Seq;
+DROP TABLE #Check;
+GO
+
+PRINT N'05_security.sql: xong';
