@@ -82,10 +82,16 @@ GO
    chu so huu (dbo) nen SQL Server khong kiem tra quyen tren bang nua. */
 GRANT SELECT, INSERT, UPDATE, EXECUTE ON SCHEMA::dbo TO rl_backend;
 
--- Chi duoc xoa o nhung bang it rui ro (Users co trigger xoa mem)
+-- Chi duoc xoa o nhung bang it rui ro (Users co trigger xoa mem).
+-- Bang danh muc: khoa ngoai van chan xoa du lieu dang duoc tham chieu.
 GRANT DELETE ON dbo.Notifications         TO rl_backend;
 GRANT DELETE ON dbo.UserNotificationPrefs TO rl_backend;
 GRANT DELETE ON dbo.Users                 TO rl_backend;
+GRANT DELETE ON dbo.Rooms                 TO rl_backend;
+GRANT DELETE ON dbo.EnvThresholds         TO rl_backend;
+GRANT DELETE ON dbo.Trays                 TO rl_backend;
+GRANT DELETE ON dbo.MushroomTypes         TO rl_backend;
+GRANT DELETE ON dbo.Devices               TO rl_backend;
 
 -- Thue khay, thanh toan: chi qua usp_RentTrays / usp_AssignTrayToCustomer
 DENY INSERT, UPDATE, DELETE ON dbo.Payments    TO rl_backend;

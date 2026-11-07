@@ -25,16 +25,16 @@ INSERT INTO dbo.Roles (RoleId, RoleName, Description) VALUES
 (3, 'Customer', N'Khách thuê khay nấm');
 
 /* ---------- Nguoi dung ----------
-   PasswordHash: gia tri tam. Backend tao lai bang bcrypt khi seed tai khoan that. */
+   PasswordHash: bcrypt cua mat khau dev chung (xem database/README.md). */
 INSERT INTO dbo.Users (RoleId, FullName, Email, Phone, PasswordHash, Address) VALUES
-(1, N'Quản trị viên',     'admin@mushroomfarm.test',     '0900000001', 'CHANGE_ME_BCRYPT_HASH', N'Trang trại nấm, Củ Chi, TP.HCM'),
-(2, N'Nguyễn Văn Vận',    'operator1@mushroomfarm.test', '0900000002', 'CHANGE_ME_BCRYPT_HASH', NULL),
-(2, N'Trần Thị Hành',     'operator2@mushroomfarm.test', '0900000003', 'CHANGE_ME_BCRYPT_HASH', NULL),
-(3, N'Lê Minh An',        'an.le@example.test',          '0911111111', 'CHANGE_ME_BCRYPT_HASH', N'12 Lê Lợi, Quận 1, TP.HCM'),
-(3, N'Phạm Thu Bình',     'binh.pham@example.test',      '0922222222', 'CHANGE_ME_BCRYPT_HASH', N'45 Nguyễn Trãi, Quận 5, TP.HCM'),
-(3, N'Hoàng Gia Cường',   'cuong.hoang@example.test',    '0933333333', 'CHANGE_ME_BCRYPT_HASH', N'78 Võ Văn Ngân, Thủ Đức, TP.HCM'),
-(3, N'Đỗ Ngọc Dung',      'dung.do@example.test',        '0944444444', 'CHANGE_ME_BCRYPT_HASH', N'9 Phan Xích Long, Phú Nhuận, TP.HCM'),
-(3, N'Vũ Quốc Em',        'em.vu@example.test',          '0955555555', 'CHANGE_ME_BCRYPT_HASH', NULL);
+(1, N'Quản trị viên',     'admin@mushroomfarm.test',     '0900000001', '$2a$10$nqlP4esxH8QTj5inQtosV./KCBbuL9.oCjt.oa4yZmzCNqJSBMJXe', N'Trang trại nấm, Củ Chi, TP.HCM'),
+(2, N'Nguyễn Văn Vận',    'operator1@mushroomfarm.test', '0900000002', '$2a$10$nqlP4esxH8QTj5inQtosV./KCBbuL9.oCjt.oa4yZmzCNqJSBMJXe', NULL),
+(2, N'Trần Thị Hành',     'operator2@mushroomfarm.test', '0900000003', '$2a$10$nqlP4esxH8QTj5inQtosV./KCBbuL9.oCjt.oa4yZmzCNqJSBMJXe', NULL),
+(3, N'Lê Minh An',        'an.le@example.test',          '0911111111', '$2a$10$nqlP4esxH8QTj5inQtosV./KCBbuL9.oCjt.oa4yZmzCNqJSBMJXe', N'12 Lê Lợi, Quận 1, TP.HCM'),
+(3, N'Phạm Thu Bình',     'binh.pham@example.test',      '0922222222', '$2a$10$nqlP4esxH8QTj5inQtosV./KCBbuL9.oCjt.oa4yZmzCNqJSBMJXe', N'45 Nguyễn Trãi, Quận 5, TP.HCM'),
+(3, N'Hoàng Gia Cường',   'cuong.hoang@example.test',    '0933333333', '$2a$10$nqlP4esxH8QTj5inQtosV./KCBbuL9.oCjt.oa4yZmzCNqJSBMJXe', N'78 Võ Văn Ngân, Thủ Đức, TP.HCM'),
+(3, N'Đỗ Ngọc Dung',      'dung.do@example.test',        '0944444444', '$2a$10$nqlP4esxH8QTj5inQtosV./KCBbuL9.oCjt.oa4yZmzCNqJSBMJXe', N'9 Phan Xích Long, Phú Nhuận, TP.HCM'),
+(3, N'Vũ Quốc Em',        'em.vu@example.test',          '0955555555', '$2a$10$nqlP4esxH8QTj5inQtosV./KCBbuL9.oCjt.oa4yZmzCNqJSBMJXe', NULL);
 
 /* ---------- Cau hinh thong bao (UC35) ---------- */
 INSERT INTO dbo.NotificationSettings (Type, DisplayName, UpdatedBy) VALUES

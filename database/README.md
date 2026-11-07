@@ -103,10 +103,13 @@ Không bấm F5 cả file. Mỗi demo mở 2 cửa sổ query, bôi đen đoạn
 ## Lưu ý cho backend
 
 - Lỗi nghiệp vụ được `THROW` với mã **50001–50099** kèm thông báo tiếng Việt → bắt theo `error.number` để trả về client.
-- Mật khẩu mẫu đang là `CHANGE_ME_BCRYPT_HASH` → cần sinh hash bcrypt thật khi seed tài khoản.
+- Mật khẩu tài khoản mẫu lưu dạng bcrypt hash (xem mục Tài khoản mẫu).
+- Cách cấu hình SQL Server cho Node.js (TCP/IP, SQL Authentication): xem `backend/README.md`.
 - Chạy truy vấn bằng `sqlcmd` thì thêm cờ `-I` (filtered index cần `QUOTED_IDENTIFIER ON`). SSMS và thư viện `mssql` của Node.js đã bật sẵn.
 
 ## Tài khoản mẫu
+
+Tất cả tài khoản mẫu dùng chung mật khẩu **`Mushroom@123`** (chỉ dùng cho môi trường dev).
 
 | Email | Vai trò |
 |---|---|
