@@ -9,6 +9,12 @@ async function completeExpiredRentals() {
   } catch (err) {
     console.error('[scheduler] Lỗi đóng đơn thuê hết hạn:', err.message);
   }
+  try {
+    const { recordset } = await db.exec('dbo.usp_SendHarvestReminders');
+    if (recordset.length) console.log(`[scheduler] Đã nhắc ${recordset.length} lịch thu hoạch sắp tới`);
+  } catch (err) {
+    console.error('[scheduler] Lỗi nhắc lịch thu hoạch:', err.message);
+  }
 }
 
 async function start() {

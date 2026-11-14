@@ -67,6 +67,11 @@ Cơ sở dữ liệu cho hệ thống quản lý nuôi trồng nấm thông minh
 | `usp_CompleteExpiredRentals` | Đóng đơn thuê hết hạn (chạy định kỳ). Đơn còn khay đang trồng được giữ đến khi thu hoạch (BR14) |
 | `usp_ExtendRental` | Gia hạn đơn thuê có trả phí (UC22, BR14) |
 | `usp_RevenueReport` | Báo cáo doanh thu theo gói |
+| `usp_DeleteRoom` | Xoá phòng: kiểm tra ràng buộc + xoá ngưỡng + xoá phòng trong 1 transaction |
+| `usp_SetRoomThresholds` | Lưu nhiều ngưỡng môi trường (JSON) trong 1 transaction, sai một thì không lưu gì |
+| `usp_ScheduleHarvest` | Lập / đổi lịch thu hoạch (UC36), mỗi khay tối đa 1 lịch đang chờ |
+| `usp_CancelHarvest` | Huỷ lịch thu hoạch đang chờ |
+| `usp_SendHarvestReminders` | Nhắc lịch thu hoạch hôm nay / ngày mai (chạy định kỳ) |
 | `usp_SetNotificationSetting` | Admin bật/tắt một loại thông báo cho toàn hệ thống |
 | `usp_SetUserNotificationPref` | Người dùng bật/tắt một loại thông báo cho riêng mình |
 
@@ -75,7 +80,7 @@ Function/view hay dùng: `fn_GetCustomerTrays(@CustomerId)`, `vw_TrayOverview`, 
 **Trigger:**
 - `trg_SensorReadings_AfterInsert`: khi có dữ liệu cảm biến mới, tự tạo cảnh báo nếu vượt ngưỡng, gửi thông báo cho Admin/Operator và khách có khay trong phòng, tự bật/tắt quạt – phun sương – sưởi; tự đóng cảnh báo khi chỉ số ổn định lại.
 - `trg_Notifications_InsteadOfInsert`: lọc thông báo theo cấu hình (Admin tắt cả hệ thống / người dùng tự tắt); cảnh báo môi trường luôn gửi cho Admin/Operator.
-- `trg_DeviceCommands_AfterInsert`, `trg_Users_InsteadOfDelete` (xoá mềm), `trg_Trays_CheckRoomCapacity`.
+- `trg_DeviceCommands_AfterInsert`, `trg_Users_InsteadOfDelete` (xoá mềm), `trg_Trays_CheckRoomCapacity` và `trg_Rooms_CheckCapacity` (số khay không vượt sức chứa, kiểm tra cả khi thêm khay lẫn khi giảm sức chứa).
 
 ## Phân quyền (05_security.sql)
 

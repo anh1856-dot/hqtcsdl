@@ -236,6 +236,70 @@ async function main() {
       rev.status === 200 && pkg1 && pkg1.ExtensionCount >= 2 && pkg1.RentalCount >= 1, rev.data);
   }
 
+  console.log('\n12. Phòng nuôi: transaction & ràng buộc');
+  {
+    const code = `RT${String(Date.now()).slice(-6)}`;
+    const room = await call('POST', '/rooms', { token: admin, body: { roomCode: code, roomName: 'Phòng kiểm thử', capacity: 5 } });
+    const roomId = room.data.data && room.data.data.RoomId;
+    check('Tạo phòng kiểm thử', room.status === 201 && roomId, room.data);
+    const okTh = await call('PUT', `/rooms/${roomId}/thresholds`, {
+      token: admin,
+      body: [{ metric: 'Temperature', minValue: 20, maxValue: 28 }, { metric: 'Humidity', minValue: 80, maxValue: 95 }],
+    });
+    check('Lưu 2 ngưỡng cùng lúc', okTh.status === 200 && okTh.data.data.length === 2, okTh.data);
+    const dupTh = await call('PUT', `/rooms/${roomId}/thresholds`, {
+      token: admin,
+      body: [{ metric: 'Temperature', minValue: 10, maxValue: 15 }, { metric: 'Temperature', minValue: 30, maxValue: 35 }],
+    });
+    const afterDup = await call('GET', `/rooms/${roomId}/thresholds`, { token: admin });
+    const temp = (afterDup.data.data || []).find((t) => t.Metric === 'Temperature');
+    check('Gửi trùng chỉ số -> 400 DB_50063, không lưu gì (atomic)',
+      dupTh.status === 400 && dupTh.data.error.code === 'DB_50063' && temp && Number(temp.MinValue) === 20, { dupTh: dupTh.data, temp });
+    const delBusy = await call('DELETE', '/rooms/1', { token: admin });
+    check('Xoá phòng đang có khay -> 409 DB_50061', delBusy.status === 409 && delBusy.data.error.code === 'DB_50061', delBusy.data);
+    const delOk = await call('DELETE', `/rooms/${roomId}`, { token: admin });
+    const gone = await call('GET', `/rooms/${roomId}`, { token: admin });
+    check('Xoá phòng trống (kèm ngưỡng) -> 204, phòng không còn', delOk.status === 204 && gone.status === 404, { del: delOk.status, gone: gone.status });
+
+    const trays = await call('GET', '/trays?roomId=3&status=Available', { token: op });
+    check('/trays trả kèm trạng thái phòng (RoomStatus)', trays.status === 200 && trays.data.data.length && trays.data.data[0].RoomStatus === 'Active', trays.data);
+    const maint = await call('PUT', '/rooms/3', { token: admin, body: { status: 'Maintenance' } });
+    check('Sửa phòng (bảng có trigger) -> 200, trạng thái Maintenance', maint.status === 200 && maint.data.data.Status === 'Maintenance', maint.data);
+    const shrink = await call('PUT', '/rooms/3', { token: admin, body: { capacity: 1 } });
+    check('Giảm sức chứa dưới số khay -> 409', shrink.status === 409, shrink.data);
+    const assignMaint = await call('POST', '/rentals/assign', {
+      token: op, body: { customerId: me.data.data.UserId, packageId: 2, trayCode: trays.data.data[0].TrayCode },
+    });
+    await call('PUT', '/rooms/3', { token: admin, body: { status: 'Active' } });
+    check('Gán khay ở phòng đang bảo trì -> 409 DB_50064', assignMaint.status === 409 && assignMaint.data.error.code === 'DB_50064', assignMaint.data);
+  }
+
+  console.log('\n13. Lập lịch thu hoạch (UC36)');
+  {
+    const ymd = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toLocaleDateString('sv-SE'); };
+    const growing = (await call('GET', '/trays?status=Growing', { token: op })).data.data || [];
+    const scheduled = (await call('GET', '/harvests?status=Scheduled', { token: op })).data.data || [];
+    const tray = growing.find((t) => !scheduled.some((h) => h.TrayId === t.TrayId));
+    check('Có khay đang trồng chưa có lịch', !!tray, growing.length);
+    const s1 = await call('POST', '/harvests', { token: op, body: { trayId: tray.TrayId, scheduledDate: ymd(3), note: 'Lịch dự kiến' } });
+    check('Lập lịch thu hoạch -> 201', s1.status === 201 && s1.data.data.Status === 'Scheduled', s1.data);
+    const s2 = await call('POST', '/harvests', { token: op, body: { trayId: tray.TrayId, scheduledDate: ymd(5) } });
+    check('Lập lại cho cùng khay = đổi ngày, không tạo lịch thứ 2',
+      s2.status === 201 && s2.data.data.HarvestId === s1.data.data.HarvestId
+        && new Date(s2.data.data.ScheduledDate).toLocaleDateString('sv-SE') === ymd(5), s2.data);
+    const past = await call('POST', '/harvests', { token: op, body: { trayId: tray.TrayId, scheduledDate: ymd(-1) } });
+    check('Ngày trong quá khứ -> 400 DB_50065', past.status === 400 && past.data.error.code === 'DB_50065', past.data);
+    const avail = (await call('GET', '/trays?status=Available', { token: op })).data.data[0];
+    const notGrowing = await call('POST', '/harvests', { token: op, body: { trayId: avail.TrayId, scheduledDate: ymd(2) } });
+    check('Khay chưa trồng -> 409 DB_50013', notGrowing.status === 409 && notGrowing.data.error.code === 'DB_50013', notGrowing.data);
+    const cust = await call('POST', '/harvests', { token: em, body: { trayId: tray.TrayId, scheduledDate: ymd(2) } });
+    check('Khách lập lịch -> 403', cust.status === 403, cust.data);
+    const cancel = await call('PATCH', `/harvests/${s1.data.data.HarvestId}/cancel`, { token: op, body: { note: 'Khay chậm phát triển' } });
+    check('Huỷ lịch đang chờ', cancel.status === 200 && cancel.data.data.Status === 'Cancelled', cancel.data);
+    const cancel2 = await call('PATCH', `/harvests/${s1.data.data.HarvestId}/cancel`, { token: op, body: {} });
+    check('Huỷ lại lịch đã huỷ -> 404 DB_50066', cancel2.status === 404 && cancel2.data.error.code === 'DB_50066', cancel2.data);
+  }
+
   console.log(`\nKết quả: ${passed} đạt, ${failed} lỗi`);
   process.exit(failed ? 1 : 0);
 }

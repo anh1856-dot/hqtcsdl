@@ -345,6 +345,8 @@ CREATE TABLE dbo.Harvests (
                                             OR (HarvestedAt IS NOT NULL AND WeightKg IS NOT NULL))
 );
 CREATE INDEX IX_Harvests_Tray ON dbo.Harvests(TrayId, Status);
+-- Moi khay chi co toi da 1 lich thu hoach dang cho (UC36)
+CREATE UNIQUE INDEX UX_Harvests_TrayScheduled ON dbo.Harvests(TrayId) WHERE Status = 'Scheduled';
 
 CREATE TABLE dbo.DeliveryRequests (
     RequestId     INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_DeliveryRequests PRIMARY KEY,

@@ -82,10 +82,10 @@ Ngày gửi lên dạng `YYYY-MM-DD`. Tên trường trả về theo tên cột 
 | GET | `/rooms` | Staff | Kèm `TrayCount`, `AvailableTrays`, `InUseTrays` |
 | GET | `/rooms/:id` | Staff | Kèm `thresholds`, `devices`, `environment` (mới nhất) |
 | POST | `/rooms` | Staff | `{ roomCode, roomName, capacity, description?, status? }` |
-| PUT | `/rooms/:id` | Staff | `{ roomName?, capacity?, description?, status? }` – status: `Active`, `Maintenance`, `Inactive` |
-| DELETE | `/rooms/:id` | Admin | Chỉ xoá được phòng chưa có khay |
+| PUT | `/rooms/:id` | Staff | `{ roomName?, capacity?, description?, status? }` – status: `Active`, `Maintenance`, `Inactive`. Sức chứa không được nhỏ hơn số khay đang có (`DB_50040`) |
+| DELETE | `/rooms/:id` | Admin | Chỉ xoá được phòng chưa có khay, thiết bị, dữ liệu cảm biến/cảnh báo (`DB_50061`, 409). Xoá ngưỡng + phòng trong 1 transaction |
 | GET | `/rooms/:id/thresholds` | Staff | |
-| PUT | `/rooms/:id/thresholds` | Admin | `[{ metric: "Temperature"\|"Humidity"\|"CO2", minValue, maxValue }]` |
+| PUT | `/rooms/:id/thresholds` | Admin | `[{ metric: "Temperature"\|"Humidity"\|"CO2", minValue, maxValue }]` – lưu tất cả hoặc không lưu gì (1 transaction). Sai → `DB_50063` (400) |
 
 ## 4. Loại nấm – `/mushroom-types`
 
@@ -154,6 +154,8 @@ Ngày gửi lên dạng `YYYY-MM-DD`. Tên trường trả về theo tên cột 
 | Method | Đường dẫn | Quyền | Body / Ghi chú |
 |---|---|---|---|
 | GET | `/harvests?status=&from=&to=` | Staff | `Scheduled` = lịch thu hoạch, `Completed` = đã thu hoạch |
+| POST | `/harvests` | Staff | `{ trayId, scheduledDate, note? }` – lập lịch thu hoạch cho khay đang trồng; khay đã có lịch chờ thì đổi sang ngày mới. Khách thuê nhận thông báo. Ngày trong quá khứ → `DB_50065` (400) |
+| PATCH | `/harvests/:id/cancel` | Staff | `{ note? }` – huỷ lịch đang chờ (`DB_50066` nếu không có) |
 | POST | `/deliveries` | Customer | `{ harvestId, requestType: "Pickup"\|"Delivery", address?, receiverPhone?, preferredDate? }` – bỏ trống địa chỉ thì lấy từ hồ sơ. Phí giao 30.000đ |
 | GET | `/deliveries?status=` | Đã đăng nhập | Customer: của mình; Staff: tất cả |
 | PATCH | `/deliveries/:id/status` | Staff | `{ status }` – khách nhận thông báo |

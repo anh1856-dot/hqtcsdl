@@ -62,14 +62,17 @@ router.put('/:id', asyncHandler(async (req, res) => {
     const used = await db.queryOne('SELECT COUNT(*) AS n FROM dbo.Trays WHERE RoomId = @id', { id: req.params.id });
     if (used.n > capacity) throw conflict(`Phòng đang có ${used.n} khay, sức chứa không được nhỏ hơn số này.`);
   }
+  // Bang Rooms co trigger (trg_Rooms_CheckCapacity) nen OUTPUT phai kem INTO
   const room = await db.queryOne(
-    `UPDATE dbo.Rooms
+    `DECLARE @ids TABLE (RoomId INT);
+     UPDATE dbo.Rooms
      SET RoomName    = COALESCE(@roomName, RoomName),
          Capacity    = COALESCE(@capacity, Capacity),
          Description = CASE WHEN @setDesc = 1 THEN @description ELSE Description END,
          Status      = COALESCE(@status, Status)
-     OUTPUT inserted.*
-     WHERE RoomId = @id`,
+     OUTPUT inserted.RoomId INTO @ids
+     WHERE RoomId = @id;
+     SELECT r.* FROM dbo.Rooms r JOIN @ids i ON i.RoomId = r.RoomId;`,
     {
       id: req.params.id,
       roomName: req.body.roomName || null,
@@ -84,16 +87,9 @@ router.put('/:id', asyncHandler(async (req, res) => {
 }));
 
 // DELETE /api/rooms/:id - chi xoa duoc phong chua co khay, thiet bi, du lieu
+// Kiem tra + xoa nguong + xoa phong nam trong 1 transaction (usp_DeleteRoom)
 router.delete('/:id', authorize('Admin'), asyncHandler(async (req, res) => {
-  const room = await db.queryOne('SELECT RoomId FROM dbo.Rooms WHERE RoomId = @id', { id: req.params.id });
-  if (!room) throw notFound('Không tìm thấy phòng.');
-  const trays = await db.queryOne('SELECT COUNT(*) AS n FROM dbo.Trays WHERE RoomId = @id', { id: req.params.id });
-  if (trays.n) throw conflict('Phòng đang có khay, không thể xóa. Hãy chuyển trạng thái phòng sang Inactive.');
-  await db.query(
-    `DELETE FROM dbo.EnvThresholds WHERE RoomId = @id;
-     DELETE FROM dbo.Rooms WHERE RoomId = @id;`,
-    { id: req.params.id }
-  );
+  await db.exec('dbo.usp_DeleteRoom', { RoomId: toInt(req.params.id, 'id', { min: 1 }) });
   res.status(204).end();
 }));
 
@@ -111,26 +107,21 @@ router.put('/:id/thresholds', authorize('Admin'), asyncHandler(async (req, res) 
   const items = Array.isArray(req.body) ? req.body : req.body.thresholds;
   if (!Array.isArray(items) || !items.length) throw badRequest('Cần gửi mảng ngưỡng [{ metric, minValue, maxValue }].');
 
-  const room = await db.queryOne('SELECT RoomId FROM dbo.Rooms WHERE RoomId = @id', { id: req.params.id });
-  if (!room) throw notFound('Không tìm thấy phòng.');
-
-  for (const item of items) {
+  // Kiem tra kieu du lieu o day; luu tat ca chi so trong 1 transaction (usp_SetRoomThresholds):
+  // mot chi so sai thi khong chi so nao duoc luu
+  const clean = items.map((item) => {
     const metric = oneOf(item.metric, METRICS, 'metric');
     const minValue = toNumber(item.minValue, 'minValue');
     const maxValue = toNumber(item.maxValue, 'maxValue');
     if (minValue >= maxValue) throw badRequest(`Ngưỡng ${metric}: minValue phải nhỏ hơn maxValue.`);
-    await db.query(
-      `MERGE dbo.EnvThresholds AS t
-       USING (SELECT @roomId AS RoomId, @metric AS Metric) AS s
-          ON t.RoomId = s.RoomId AND t.Metric = s.Metric
-       WHEN MATCHED THEN UPDATE SET MinValue = @minValue, MaxValue = @maxValue, UpdatedBy = @userId, UpdatedAt = SYSDATETIME()
-       WHEN NOT MATCHED THEN INSERT (RoomId, Metric, MinValue, MaxValue, UpdatedBy)
-                             VALUES (@roomId, @metric, @minValue, @maxValue, @userId);`,
-      { roomId: req.params.id, metric, minValue, maxValue, userId: req.user.id }
-    );
-  }
-  const rows = await db.query('SELECT Metric, MinValue, MaxValue, UpdatedAt FROM dbo.EnvThresholds WHERE RoomId = @id', { id: req.params.id });
-  res.json({ data: rows });
+    return { metric, minValue, maxValue };
+  });
+  const { recordset } = await db.exec('dbo.usp_SetRoomThresholds', {
+    RoomId: toInt(req.params.id, 'id', { min: 1 }),
+    UserId: req.user.id,
+    Thresholds: JSON.stringify(clean),
+  });
+  res.json({ data: recordset });
 }));
 
 module.exports = router;

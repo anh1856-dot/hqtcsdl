@@ -2,7 +2,7 @@ const router = require('express').Router();
 const db = require('../config/db');
 const { authenticate, authorize } = require('../middlewares/auth');
 const { asyncHandler } = require('../utils/http');
-const { oneOf, toDate } = require('../utils/validate');
+const { oneOf, toDate, toInt, requireFields } = require('../utils/validate');
 
 router.use(authenticate, authorize('Admin', 'Operator'));
 
@@ -32,6 +32,33 @@ router.get('/', asyncHandler(async (req, res) => {
     }
   );
   res.json({ data: rows });
+}));
+
+// POST /api/harvests { trayId, scheduledDate, note? } - lap lich / doi lich thu hoach (UC36)
+// Khay da co lich dang cho thi doi sang ngay moi. Khach thue nhan thong bao.
+router.post('/', asyncHandler(async (req, res) => {
+  requireFields(req.body, ['trayId', 'scheduledDate']);
+  const { recordset } = await db.exec(
+    'dbo.usp_ScheduleHarvest',
+    {
+      TrayId: toInt(req.body.trayId, 'trayId', { min: 1 }),
+      ScheduledDate: toDate(req.body.scheduledDate, 'scheduledDate'),
+      OperatorId: req.user.id,
+      Note: req.body.note ? String(req.body.note).slice(0, 500) : null,
+    },
+    { HarvestId: db.sql.Int }
+  );
+  res.status(201).json({ data: recordset[0] || null });
+}));
+
+// PATCH /api/harvests/:id/cancel { note? } - huy lich thu hoach dang cho
+router.patch('/:id/cancel', asyncHandler(async (req, res) => {
+  const { recordset } = await db.exec('dbo.usp_CancelHarvest', {
+    HarvestId: toInt(req.params.id, 'id', { min: 1 }),
+    OperatorId: req.user.id,
+    Note: req.body && req.body.note ? String(req.body.note).slice(0, 500) : null,
+  });
+  res.json({ data: recordset[0] || null });
 }));
 
 module.exports = router;
