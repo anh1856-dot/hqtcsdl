@@ -62,7 +62,7 @@ GO
 CREATE OR ALTER VIEW dbo.vw_TrayOverview
 AS
 SELECT  t.TrayId, t.TrayCode, t.PositionLabel,
-        r.RoomId, r.RoomCode, r.RoomName,
+        r.RoomId, r.RoomCode, r.RoomName, r.Status AS RoomStatus,
         mt.MushroomTypeId, mt.TypeName,
         t.Status, t.Stage, t.PlantedDate, t.ExpectedHarvestDate,
         DATEDIFF(DAY, CAST(SYSDATETIME() AS DATE), t.ExpectedHarvestDate) AS DaysToHarvest,

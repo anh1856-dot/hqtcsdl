@@ -356,6 +356,8 @@ CREATE TABLE dbo.Harvests (
                                             OR (HarvestedAt IS NOT NULL AND WeightKg IS NOT NULL))
 );
 CREATE INDEX IX_Harvests_Tray ON dbo.Harvests(TrayId, Status);
+-- Moi khay chi co toi da 1 lich thu hoach dang cho (UC36)
+CREATE UNIQUE INDEX UX_Harvests_TrayScheduled ON dbo.Harvests(TrayId) WHERE Status = 'Scheduled';
 
 CREATE TABLE dbo.DeliveryRequests (
     RequestId     INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_DeliveryRequests PRIMARY KEY,
@@ -447,7 +449,7 @@ GO
 CREATE OR ALTER VIEW dbo.vw_TrayOverview
 AS
 SELECT  t.TrayId, t.TrayCode, t.PositionLabel,
-        r.RoomId, r.RoomCode, r.RoomName,
+        r.RoomId, r.RoomCode, r.RoomName, r.Status AS RoomStatus,
         mt.MushroomTypeId, mt.TypeName,
         t.Status, t.Stage, t.PlantedDate, t.ExpectedHarvestDate,
         DATEDIFF(DAY, CAST(SYSDATETIME() AS DATE), t.ExpectedHarvestDate) AS DaysToHarvest,
@@ -765,9 +767,10 @@ BEGIN
     BEGIN TRY
         BEGIN TRANSACTION;
 
-        DECLARE @TrayId INT, @TrayStatus VARCHAR(20), @Growth INT, @Msg NVARCHAR(400);
-        SELECT @TrayId = t.TrayId, @TrayStatus = t.Status, @Growth = mt.GrowthDays
+        DECLARE @TrayId INT, @TrayStatus VARCHAR(20), @Growth INT, @RoomStatus VARCHAR(20), @Msg NVARCHAR(400);
+        SELECT @TrayId = t.TrayId, @TrayStatus = t.Status, @Growth = mt.GrowthDays, @RoomStatus = r.Status
         FROM dbo.Trays t WITH (UPDLOCK, HOLDLOCK)
+        JOIN dbo.Rooms r ON r.RoomId = t.RoomId
         LEFT JOIN dbo.MushroomTypes mt ON mt.MushroomTypeId = t.MushroomTypeId
         WHERE t.TrayCode = @TrayCode;
 
@@ -775,6 +778,9 @@ BEGIN
             THROW 50005, N'Mã khay không tồn tại.', 1;
         IF @TrayStatus <> 'Available'
             THROW 50006, N'Khay không ở trạng thái sẵn sàng cho thuê.', 1;
+        -- Phong bao tri / ngung hoat dong thi khong cho thue (giong usp_RentTrays)
+        IF @RoomStatus <> 'Active'
+            THROW 50064, N'Phòng của khay đang bảo trì hoặc ngừng hoạt động, không thể cho thuê.', 1;
         -- BR14: loai nam cua khay phai kip thu hoach trong thoi han goi
         IF @Growth > @Duration
         BEGIN
@@ -1104,7 +1110,9 @@ BEGIN
     INSERT INTO dbo.GrowthLogs (TrayId, Stage, Note, ImageUrl, LoggedBy)
     VALUES (@TrayId, @NewStage, @Note, @ImageUrl, @OperatorId);
 
+    -- Tu tao lich thu hoach khi sang giai doan Thu hoach, tru khi Operator da lap lich truoc (UC36)
     IF @NewStage = 'Harvest'
+       AND NOT EXISTS (SELECT 1 FROM dbo.Harvests WHERE TrayId = @TrayId AND Status = 'Scheduled')
     BEGIN
         DECLARE @Today DATE = CAST(SYSDATETIME() AS DATE);
         INSERT INTO dbo.Harvests (TrayId, RentalId, ScheduledDate, Status)
@@ -1402,6 +1410,239 @@ END;
 GO
 
 /* =====================================================================
+   3b. PHONG NUOI & LICH THU HOACH
+   ===================================================================== */
+
+-- UC09: Xoa phong. Kiem tra rang buoc + xoa nguong + xoa phong trong 1 transaction
+-- (truoc day backend xoa nguong roi moi xoa phong, loi giua chung se mat nguong).
+CREATE OR ALTER PROCEDURE dbo.usp_DeleteRoom
+    @RoomId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- Khoa dong phong: khong ai them khay/thiet bi vao phong trong luc dang xoa
+        IF NOT EXISTS (SELECT 1 FROM dbo.Rooms WITH (UPDLOCK, HOLDLOCK) WHERE RoomId = @RoomId)
+            THROW 50060, N'Không tìm thấy phòng.', 1;
+        IF EXISTS (SELECT 1 FROM dbo.Trays WHERE RoomId = @RoomId)
+            THROW 50061, N'Phòng đang có khay, không thể xóa. Hãy chuyển trạng thái phòng sang Inactive.', 1;
+        IF EXISTS (SELECT 1 FROM dbo.Devices WHERE RoomId = @RoomId)
+            THROW 50061, N'Phòng đang có thiết bị, hãy xóa hoặc chuyển thiết bị sang phòng khác trước.', 1;
+        IF EXISTS (SELECT 1 FROM dbo.SensorReadings WHERE RoomId = @RoomId)
+           OR EXISTS (SELECT 1 FROM dbo.Alerts WHERE RoomId = @RoomId)
+            THROW 50061, N'Phòng đã có dữ liệu cảm biến/cảnh báo, không xóa để giữ lịch sử. Hãy chuyển sang Inactive.', 1;
+
+        DELETE FROM dbo.EnvThresholds WHERE RoomId = @RoomId;
+        DELETE FROM dbo.Rooms WHERE RoomId = @RoomId;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END;
+GO
+
+-- UC29: Cap nhat nguong moi truong cua phong. Nhan nhieu chi so dang JSON:
+--   [{"metric":"Humidity","minValue":80,"maxValue":95}, ...]
+-- Tat ca chi so hop le thi luu het, mot chi so sai thi khong luu gi (atomic).
+CREATE OR ALTER PROCEDURE dbo.usp_SetRoomThresholds
+    @RoomId    INT,
+    @UserId    INT,
+    @Thresholds NVARCHAR(MAX)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF ISJSON(@Thresholds) <> 1
+        THROW 50063, N'Danh sách ngưỡng không đúng định dạng JSON.', 1;
+
+    DECLARE @T TABLE (Metric VARCHAR(15), MinValue DECIMAL(7,2), MaxValue DECIMAL(7,2));
+    INSERT INTO @T (Metric, MinValue, MaxValue)
+    SELECT metric, minValue, maxValue
+    FROM OPENJSON(@Thresholds)
+         WITH (metric VARCHAR(15) '$.metric', minValue DECIMAL(7,2) '$.minValue', maxValue DECIMAL(7,2) '$.maxValue');
+
+    DECLARE @Msg NVARCHAR(400);
+    IF NOT EXISTS (SELECT 1 FROM @T)
+        THROW 50063, N'Cần gửi ít nhất một ngưỡng.', 1;
+    IF EXISTS (SELECT 1 FROM @T WHERE Metric IS NULL OR Metric NOT IN ('Temperature', 'Humidity', 'CO2'))
+        THROW 50063, N'Chỉ số phải là Temperature, Humidity hoặc CO2.', 1;
+    IF EXISTS (SELECT 1 FROM @T GROUP BY Metric HAVING COUNT(*) > 1)
+        THROW 50063, N'Mỗi chỉ số chỉ được gửi một lần.', 1;
+    SELECT TOP (1) @Msg = CONCAT(N'Ngưỡng ', Metric, N': giá trị nhỏ nhất phải nhỏ hơn giá trị lớn nhất.')
+    FROM @T WHERE MinValue IS NULL OR MaxValue IS NULL OR MinValue >= MaxValue;
+    IF @Msg IS NOT NULL
+        THROW 50063, @Msg, 1;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF NOT EXISTS (SELECT 1 FROM dbo.Rooms WITH (UPDLOCK, HOLDLOCK) WHERE RoomId = @RoomId)
+            THROW 50060, N'Không tìm thấy phòng.', 1;
+
+        MERGE dbo.EnvThresholds WITH (HOLDLOCK) AS t
+        USING @T AS s ON t.RoomId = @RoomId AND t.Metric = s.Metric
+        WHEN MATCHED THEN
+            UPDATE SET MinValue = s.MinValue, MaxValue = s.MaxValue, UpdatedBy = @UserId, UpdatedAt = SYSDATETIME()
+        WHEN NOT MATCHED THEN
+            INSERT (RoomId, Metric, MinValue, MaxValue, UpdatedBy)
+            VALUES (@RoomId, s.Metric, s.MinValue, s.MaxValue, @UserId);
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT Metric, MinValue, MaxValue, UpdatedAt FROM dbo.EnvThresholds WHERE RoomId = @RoomId;
+END;
+GO
+
+-- UC36: Operator lap lich (hoac doi lich) thu hoach cho khay dang trong.
+-- Khay da co lich dang cho thi doi ngay; chua co thi tao moi. Bao cho khach thue.
+CREATE OR ALTER PROCEDURE dbo.usp_ScheduleHarvest
+    @TrayId        INT,
+    @ScheduledDate DATE,
+    @OperatorId    INT,
+    @Note          NVARCHAR(500) = NULL,
+    @HarvestId     INT = NULL OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF ISNULL(dbo.fn_GetActiveUserRole(@OperatorId), '') NOT IN ('Admin', 'Operator')
+        THROW 50010, N'Bạn không có quyền thực hiện thao tác này.', 1;
+    IF @ScheduledDate IS NULL OR @ScheduledDate < CAST(SYSDATETIME() AS DATE)
+        THROW 50065, N'Ngày thu hoạch phải từ hôm nay trở đi.', 1;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        DECLARE @Status VARCHAR(20), @TrayCode VARCHAR(20);
+        SELECT @Status = Status, @TrayCode = TrayCode
+        FROM dbo.Trays WITH (UPDLOCK, HOLDLOCK) WHERE TrayId = @TrayId;
+        IF @Status IS NULL
+            THROW 50005, N'Khay không tồn tại.', 1;
+        IF @Status NOT IN ('Growing', 'ReadyToHarvest')
+            THROW 50013, N'Chỉ lập lịch thu hoạch cho khay đang trồng.', 1;
+
+        SET @HarvestId = (SELECT HarvestId FROM dbo.Harvests WITH (UPDLOCK)
+                          WHERE TrayId = @TrayId AND Status = 'Scheduled');
+        DECLARE @IsNew BIT = CASE WHEN @HarvestId IS NULL THEN 1 ELSE 0 END;
+
+        IF @IsNew = 1
+        BEGIN
+            INSERT INTO dbo.Harvests (TrayId, RentalId, ScheduledDate, Status, Note)
+            VALUES (@TrayId,
+                    (SELECT RentalId FROM dbo.RentalTrays WHERE TrayId = @TrayId AND IsActive = 1),
+                    @ScheduledDate, 'Scheduled', @Note);
+            SET @HarvestId = SCOPE_IDENTITY();
+        END
+        ELSE
+            UPDATE dbo.Harvests SET ScheduledDate = @ScheduledDate, Note = COALESCE(@Note, Note)
+            WHERE HarvestId = @HarvestId;
+
+        DECLARE @CustomerId INT = dbo.fn_GetTrayRenter(@TrayId);
+        IF @CustomerId IS NOT NULL
+            INSERT INTO dbo.Notifications (UserId, Type, Title, Content, TrayId)
+            VALUES (@CustomerId, 'HarvestReady',
+                    CASE WHEN @IsNew = 1 THEN N'Đã có lịch thu hoạch' ELSE N'Lịch thu hoạch thay đổi' END,
+                    CONCAT(N'Khay ', @TrayCode, N' dự kiến thu hoạch ngày ', FORMAT(@ScheduledDate, 'dd/MM/yyyy'), N'.'),
+                    @TrayId);
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT HarvestId, TrayId, ScheduledDate, Status, Note FROM dbo.Harvests WHERE HarvestId = @HarvestId;
+END;
+GO
+
+-- UC36: Huy lich thu hoach dang cho (vd khay bi benh, can lap lai lich)
+CREATE OR ALTER PROCEDURE dbo.usp_CancelHarvest
+    @HarvestId  INT,
+    @OperatorId INT,
+    @Note       NVARCHAR(500) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF ISNULL(dbo.fn_GetActiveUserRole(@OperatorId), '') NOT IN ('Admin', 'Operator')
+        THROW 50010, N'Bạn không có quyền thực hiện thao tác này.', 1;
+
+    BEGIN TRANSACTION;
+
+    UPDATE dbo.Harvests
+    SET Status = 'Cancelled', Note = COALESCE(@Note, Note)
+    WHERE HarvestId = @HarvestId AND Status = 'Scheduled';
+
+    IF @@ROWCOUNT = 0
+        THROW 50066, N'Không tìm thấy lịch thu hoạch đang chờ.', 1;
+
+    COMMIT TRANSACTION;
+
+    SELECT HarvestId, TrayId, ScheduledDate, Status, Note FROM dbo.Harvests WHERE HarvestId = @HarvestId;
+END;
+GO
+
+-- Scheduler: nhac lich thu hoach dien ra trong ngay mai (hoac hom nay) cho khach thue va Operator.
+-- Moi lich chi nhac 1 lan.
+CREATE OR ALTER PROCEDURE dbo.usp_SendHarvestReminders
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @Today DATE = CAST(SYSDATETIME() AS DATE);
+    DECLARE @Due TABLE (HarvestId INT PRIMARY KEY, TrayId INT, TrayCode VARCHAR(20),
+                        ScheduledDate DATE, CustomerId INT);
+
+    BEGIN TRANSACTION;
+
+    INSERT INTO @Due (HarvestId, TrayId, TrayCode, ScheduledDate, CustomerId)
+    SELECT h.HarvestId, h.TrayId, t.TrayCode, h.ScheduledDate, dbo.fn_GetTrayRenter(h.TrayId)
+    FROM dbo.Harvests h
+    JOIN dbo.Trays t ON t.TrayId = h.TrayId
+    WHERE h.Status = 'Scheduled'
+      AND h.ScheduledDate BETWEEN @Today AND DATEADD(DAY, 1, @Today)
+      AND NOT EXISTS (SELECT 1 FROM dbo.Notifications n
+                      WHERE n.Type = 'HarvestReady'
+                        AND n.Content LIKE CONCAT(N'Nhắc lịch #', h.HarvestId, N':%'));
+
+    INSERT INTO dbo.Notifications (UserId, Type, Title, Content, TrayId)
+    SELECT d.CustomerId, 'HarvestReady', N'Sắp đến ngày thu hoạch',
+           CONCAT(N'Nhắc lịch #', d.HarvestId, N': khay ', d.TrayCode, N' thu hoạch ngày ',
+                  FORMAT(d.ScheduledDate, 'dd/MM/yyyy'), N'.'), d.TrayId
+    FROM @Due d WHERE d.CustomerId IS NOT NULL
+    UNION ALL
+    SELECT u.UserId, 'HarvestReady', N'Lịch thu hoạch sắp tới',
+           CONCAT(N'Nhắc lịch #', d.HarvestId, N': khay ', d.TrayCode, N' cần thu hoạch ngày ',
+                  FORMAT(d.ScheduledDate, 'dd/MM/yyyy'), N'.'), d.TrayId
+    FROM @Due d
+    CROSS JOIN dbo.Users u
+    JOIN dbo.Roles ro ON ro.RoleId = u.RoleId
+    WHERE ro.RoleName = 'Operator' AND u.Status = 'Active' AND u.IsDeleted = 0;
+
+    COMMIT TRANSACTION;
+
+    SELECT HarvestId, TrayCode, ScheduledDate FROM @Due;
+END;
+GO
+
+/* =====================================================================
    4. BAO CAO
    ===================================================================== */
 
@@ -1627,6 +1868,26 @@ BEGIN
     BEGIN
         ROLLBACK TRANSACTION;
         THROW 50040, N'Số khay vượt quá sức chứa của phòng.', 1;
+    END;
+END;
+GO
+
+-- Chieu nguoc lai: giam suc chua phong xuong duoi so khay dang co cung bi chan
+-- (truoc day chi backend kiem tra, sua thang Rooms.Capacity van lot qua)
+CREATE OR ALTER TRIGGER dbo.trg_Rooms_CheckCapacity
+ON dbo.Rooms
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF NOT UPDATE(Capacity) RETURN;
+
+    IF EXISTS (SELECT 1
+               FROM inserted r
+               WHERE (SELECT COUNT(*) FROM dbo.Trays t WHERE t.RoomId = r.RoomId) > r.Capacity)
+    BEGIN
+        ROLLBACK TRANSACTION;
+        THROW 50040, N'Sức chứa không được nhỏ hơn số khay đang có trong phòng.', 1;
     END;
 END;
 GO

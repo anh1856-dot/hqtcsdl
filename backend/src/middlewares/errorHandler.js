@@ -34,6 +34,12 @@ const SQL_ERROR_STATUS = {
   50050: 404, // don thue khong ton tai
   50051: 409, // don thue khong con hoat dong (khong gia han duoc)
   50052: 400, // so ky gia han khong hop le
+  50060: 404, // phong khong ton tai
+  50061: 409, // phong con khay / thiet bi / du lieu, khong xoa duoc
+  50063: 400, // nguong moi truong khong hop le
+  50064: 409, // phong cua khay dang bao tri / ngung hoat dong
+  50065: 400, // ngay thu hoach khong hop le
+  50066: 404, // khong co lich thu hoach dang cho
 };
 
 // Loi he thong SQL Server thuong gap
