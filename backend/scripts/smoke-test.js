@@ -181,6 +181,61 @@ async function main() {
   const afterLock = await call('GET', '/auth/me', { token: newToken });
   check('Tài khoản bị khóa -> token cũ mất hiệu lực (401)', afterLock.status === 401);
 
+  console.log('\n11. Đơn thuê hết hạn & gia hạn (BR14)');
+  {
+    // Loai nam sinh truong > 30 ngay (dai hon goi 1) va dang con khay trong
+    const types = (await call('GET', '/mushroom-types', { token: op })).data.data || [];
+    const availAll = (await call('GET', '/trays/available', { token: em })).data.data || [];
+    const roomOfLong = availAll.find((r) => (types.find((t) => t.MushroomTypeId === r.MushroomTypeId) || {}).GrowthDays > 30);
+    const linhChi = roomOfLong && types.find((t) => t.MushroomTypeId === roomOfLong.MushroomTypeId);
+    check('Có khay trống của loại nấm sinh trưởng > 30 ngày để kiểm thử', !!linhChi, availAll);
+    const tooShort = await call('POST', '/rentals', { token: em, body: { packageId: 1, mushroomTypeId: linhChi.MushroomTypeId } });
+    check('Gói 30 ngày + loại nấm dài hơn -> 400 DB_50009', tooShort.status === 400 && tooShort.data.error.code === 'DB_50009', tooShort.data);
+
+    const roomShort = await call('POST', '/rentals', { token: em, body: { packageId: 1, roomId: roomOfLong.RoomId } });
+    check('Chọn phòng chỉ có nấm dài hơn gói -> 400 DB_50009', roomShort.status === 400 && roomShort.data.error.code === 'DB_50009', roomShort.data);
+
+    const availPkg = await call('GET', '/trays/available?packageId=1', { token: em });
+    check('/trays/available?packageId=1 không đếm khay nấm dài hơn gói',
+      availPkg.status === 200 && !availPkg.data.data.some((r) => r.MushroomTypeId === linhChi.MushroomTypeId), availPkg.data);
+
+    const freeLong = await call('GET', `/trays?roomId=${roomOfLong.RoomId}&status=Available`, { token: op });
+    const longTray = (freeLong.data.data || [])[0];
+    const assignShort = await call('POST', '/rentals/assign', {
+      token: op, body: { customerId: me.data.data.UserId, packageId: 1, trayCode: longTray && longTray.TrayCode },
+    });
+    check('Operator gán khay nấm dài hơn gói -> 400 DB_50009', assignShort.status === 400 && assignShort.data.error.code === 'DB_50009', assignShort.data);
+
+    const newRent = await call('POST', '/rentals', { token: em, body: { packageId: 1, trayCount: 1, roomId: 1 } });
+    const rid = newRent.data.data && newRent.data.data.rentalId;
+    check('Thuê gói 30 ngày cho nấm kịp thu hoạch', newRent.status === 201 && rid, newRent.data);
+    const before = (await call('GET', `/rentals/${rid}`, { token: em })).data.data;
+
+    const ext = await call('POST', `/rentals/${rid}/extend`, { token: em, body: { terms: 1 } });
+    const after = (await call('GET', `/rentals/${rid}`, { token: em })).data.data;
+    const dayDiff = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
+    check('Khách gia hạn 1 kỳ: +30 ngày, thu 150.000đ',
+      ext.status === 200 && Number(ext.data.data.Amount) === 150000
+        && dayDiff(before.EndDate, after.EndDate) === 30, { ext: ext.data, before: before.EndDate, after: after.EndDate });
+    check('Gia hạn ghi thêm thanh toán và cộng tổng tiền đơn',
+      after.payments.length === 2 && Number(after.TotalAmount) === Number(before.TotalAmount) + 150000, after);
+
+    const otherExt = await call('POST', `/rentals/${rid}/extend`, { token: dung, body: {} });
+    check('Khách khác gia hạn đơn không phải của mình -> 403', otherExt.status === 403, otherExt.data);
+    const badTerms = await call('POST', `/rentals/${rid}/extend`, { token: em, body: { terms: 0 } });
+    check('Số kỳ gia hạn = 0 -> 400', badTerms.status === 400, badTerms.data);
+    const noRental = await call('POST', '/rentals/999999/extend', { token: op, body: {} });
+    check('Gia hạn đơn không tồn tại -> 404', noRental.status === 404, noRental.data);
+    const opExt = await call('POST', `/rentals/${rid}/extend`, { token: op, body: { terms: 2 } });
+    check('Operator gia hạn hộ 2 kỳ (thanh toán mặc định Cash)', opExt.status === 200 && Number(opExt.data.data.ExtendedDays) === 60, opExt.data);
+
+    const today = new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD theo gio may (khong lay ngay UTC)
+    const rev = await call('GET', `/reports/revenue?from=${today}&to=${today}`, { token: admin });
+    const pkg1 = (rev.data.data || []).find((r) => r.PackageId === 1);
+    check('Báo cáo doanh thu không đếm trùng đơn khi gia hạn (có ExtensionCount)',
+      rev.status === 200 && pkg1 && pkg1.ExtensionCount >= 2 && pkg1.RentalCount >= 1, rev.data);
+  }
+
   console.log(`\nKết quả: ${passed} đạt, ${failed} lỗi`);
   process.exit(failed ? 1 : 0);
 }

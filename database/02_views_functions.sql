@@ -124,15 +124,23 @@ GO
 -- Doanh thu theo thang (chi tinh thanh toan thanh cong)
 CREATE OR ALTER VIEW dbo.vw_MonthlyRevenue
 AS
-SELECT  YEAR(p.PaidAt)  AS [Year],
-        MONTH(p.PaidAt) AS [Month],
-        COUNT(DISTINCT p.RentalId) AS RentalCount,
-        SUM(rn.TrayCount)          AS TrayCount,
-        SUM(p.Amount)              AS Revenue
-FROM dbo.Payments p
-JOIN dbo.Rentals rn ON rn.RentalId = p.RentalId
-WHERE p.Status = 'Paid'
-GROUP BY YEAR(p.PaidAt), MONTH(p.PaidAt);
+-- Don thue + cac lan gia han (BR14) deu la thanh toan: so don/so khay chi tinh
+-- o thanh toan dau tien cua don de khong dem trung; doanh thu cong tat ca.
+WITH P AS (
+    SELECT p.RentalId, p.Amount, p.PaidAt,
+           CASE WHEN p.PaymentId = MIN(p.PaymentId) OVER (PARTITION BY p.RentalId) THEN 1 ELSE 0 END AS IsFirst
+    FROM dbo.Payments p
+    WHERE p.Status = 'Paid'
+)
+SELECT  YEAR(P.PaidAt)  AS [Year],
+        MONTH(P.PaidAt) AS [Month],
+        SUM(P.IsFirst)                                            AS RentalCount,
+        SUM(CASE WHEN P.IsFirst = 1 THEN rn.TrayCount ELSE 0 END) AS TrayCount,
+        SUM(1 - P.IsFirst)                                        AS ExtensionCount,
+        SUM(P.Amount)                                             AS Revenue
+FROM P
+JOIN dbo.Rentals rn ON rn.RentalId = P.RentalId
+GROUP BY YEAR(P.PaidAt), MONTH(P.PaidAt);
 GO
 
 -- San luong thu hoach theo thang va loai nam

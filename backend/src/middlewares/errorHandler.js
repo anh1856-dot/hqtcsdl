@@ -13,6 +13,7 @@ const SQL_ERROR_STATUS = {
   50006: 409, // khay khong san sang cho thue
   50007: 403, // khay khong thuoc don thue cua ban
   50008: 409, // khay da lien ket
+  50009: 400, // goi thue qua ngan cho loai nam (BR14)
   50010: 403, // khong co quyen
   50011: 404, // loai nam khong ton tai
   50012: 409, // khay khong the bat dau trong
@@ -30,6 +31,9 @@ const SQL_ERROR_STATUS = {
   50034: 404, // canh bao khong ton tai / da xu ly
   50035: 404, // loai thong bao khong ton tai
   50040: 409, // vuot suc chua phong
+  50050: 404, // don thue khong ton tai
+  50051: 409, // don thue khong con hoat dong (khong gia han duoc)
+  50052: 400, // so ky gia han khong hop le
 };
 
 // Loi he thong SQL Server thuong gap

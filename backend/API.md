@@ -100,7 +100,7 @@ Ngày gửi lên dạng `YYYY-MM-DD`. Tên trường trả về theo tên cột 
 
 | Method | Đường dẫn | Quyền | Body / Ghi chú |
 |---|---|---|---|
-| GET | `/trays/available` | Đã đăng nhập | Số khay trống theo phòng + loại nấm (khách xem trước khi thuê) |
+| GET | `/trays/available?packageId=` | Đã đăng nhập | Số khay trống theo phòng + loại nấm (khách xem trước khi thuê). Có `packageId` thì chỉ đếm khay thuê được với gói đó (BR14) |
 | GET | `/trays?roomId=&status=&q=` | Staff | Kèm khách đang thuê, ngày thu hoạch dự kiến, `DaysToHarvest` |
 | GET | `/trays/:id` | Staff | Kèm `growthLogs`, `harvests` |
 | POST | `/trays` | Staff | `{ roomId, quantity?, mushroomTypeId?, positionLabel? }` – mã khay tự sinh `TRAY-R01-013` |
@@ -131,7 +131,14 @@ Ngày gửi lên dạng `YYYY-MM-DD`. Tên trường trả về theo tên cột 
 | POST | `/rentals/link` | Customer | `{ trayCode }` – nhập mã khay để liên kết vào tài khoản |
 | GET | `/rentals?status=&customerId=&page=` | Đã đăng nhập | Customer: đơn của mình; Staff: tất cả |
 | GET | `/rentals/:id` | Đã đăng nhập | Kèm `trays`, `payments` |
+| POST | `/rentals/:id/extend` | Đã đăng nhập | `{ terms?, paymentMethod? }` → `{ RentalId, EndDate, ExtendedDays, Amount }`. Gia hạn thêm `terms` kỳ (1–12) theo gói của đơn, trả phí giả lập. Customer: chỉ đơn của mình; Staff: gia hạn hộ |
 | POST | `/rentals/complete-expired` | Admin | Đóng đơn hết hạn ngay (bình thường server tự chạy mỗi ngày) |
+
+**Chính sách đơn thuê hết hạn (BR14):**
+- Khi thuê, loại nấm phải kịp thu hoạch trong thời hạn gói. Gói quá ngắn → lỗi `DB_50009` (400), hiện thẳng `error.message` cho người dùng.
+- Vụ trồng bị chậm, đơn đến hạn khi khay còn đang trồng → đơn **vẫn `Active`** đến khi thu hoạch xong, không tính thêm phí. Khách và Operator nhận thông báo loại `Rental` một lần. Thu hoạch xong thì đơn tự đóng.
+- Muốn dùng khay lâu hơn → gọi `/rentals/:id/extend`. Đơn đang quá hạn thì thời gian gia hạn tính từ hôm nay.
+- Lỗi gia hạn: `DB_50050` không tìm thấy đơn (404), `DB_50051` đơn không còn hoạt động (409), `DB_50052` số kỳ sai (400), `DB_50010` không phải đơn của bạn (403).
 
 ## 8. Dành cho khách hàng – `/my`  (Customer)
 

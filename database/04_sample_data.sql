@@ -107,7 +107,7 @@ CROSS JOIN (VALUES ('SEN',   N'Cảm biến môi trường', 'Sensor'),
 INSERT INTO dbo.RentalPackages (PackageName, DurationDays, PricePerTray, MaxTrays, Description) VALUES
 (N'Gói Trải nghiệm', 30, 150000,  2, N'Phù hợp người mới, 1 vụ nấm bào ngư'),
 (N'Gói Tiêu chuẩn',  60, 250000,  5, N'Theo dõi trọn vụ, kèm thông báo tiến độ'),
-(N'Gói Gia đình',    90, 350000, 10, N'Nhiều khay, phù hợp nấm chu kỳ dài');
+(N'Gói Gia đình',   120, 350000, 10, N'Nhiều khay, đủ thời gian cho nấm chu kỳ dài như linh chi');
 GO
 
 /* =====================================================================

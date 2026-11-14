@@ -9,15 +9,21 @@ const STAGES = ['Inoculation', 'Incubation', 'Pinning', 'Fruiting', 'Harvest'];
 
 router.use(authenticate);
 
-// GET /api/trays/available - khay con trong theo phong / loai nam (khach xem truoc khi thue)
+// GET /api/trays/available?packageId= - khay con trong theo phong / loai nam (khach xem truoc khi thue)
+// Co packageId: chi dem khay co loai nam kip thu hoach trong thoi han goi (BR14),
+// dung so nay de hien "con X khay" cho dung voi so khay thue duoc.
 router.get('/available', asyncHandler(async (req, res) => {
   const rows = await db.query(
-    `SELECT v.RoomId, v.RoomName, v.MushroomTypeId, v.TypeName, COUNT(*) AS AvailableTrays
+    `DECLARE @duration INT = (SELECT DurationDays FROM dbo.RentalPackages WHERE PackageId = @packageId);
+     SELECT v.RoomId, v.RoomName, v.MushroomTypeId, v.TypeName, COUNT(*) AS AvailableTrays
      FROM dbo.vw_TrayOverview v
      JOIN dbo.Rooms r ON r.RoomId = v.RoomId AND r.Status = 'Active'
+     LEFT JOIN dbo.MushroomTypes mt ON mt.MushroomTypeId = v.MushroomTypeId
      WHERE v.Status = 'Available'
+       AND (@duration IS NULL OR mt.GrowthDays IS NULL OR mt.GrowthDays <= @duration)
      GROUP BY v.RoomId, v.RoomName, v.MushroomTypeId, v.TypeName
-     ORDER BY v.RoomName`
+     ORDER BY v.RoomName`,
+    { packageId: toInt(req.query.packageId, 'packageId', { optional: true }) }
   );
   res.json({ data: rows });
 }));
