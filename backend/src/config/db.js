@@ -9,6 +9,9 @@ const config = {
   options: {
     encrypt: env.DB_ENCRYPT,
     trustServerCertificate: env.DB_TRUST_SERVER_CERTIFICATE,
+    // DB luu gio dia phuong (SYSDATETIME), khong phai UTC.
+    // Mac dinh mssql coi moi gia tri datetime la UTC -> API tra lech mui gio.
+    useUTC: false,
   },
   pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
 };
