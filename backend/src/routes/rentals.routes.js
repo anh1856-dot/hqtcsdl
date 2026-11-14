@@ -56,6 +56,23 @@ router.post('/link', authorize('Customer'), asyncHandler(async (req, res) => {
   res.json({ data: recordset[0] || null });
 }));
 
+// POST /api/rentals/:id/extend { terms?, paymentMethod? } - gia han don thue (BR14 / UC22)
+// Khach: chi gia han don cua minh. Admin/Operator: gia han ho khach.
+router.post('/:id/extend', asyncHandler(async (req, res) => {
+  const { recordset, output } = await db.exec(
+    'dbo.usp_ExtendRental',
+    {
+      RentalId: toInt(req.params.id, 'id', { min: 1 }),
+      ActorId: req.user.id,
+      Terms: toInt(req.body.terms ?? 1, 'terms', { min: 1, max: 12 }),
+      PaymentMethod: oneOf(req.body.paymentMethod, PAYMENT_METHODS, 'paymentMethod', { optional: true })
+        || (isStaff(req.user) ? 'Cash' : 'EWallet'),
+    },
+    { NewEndDate: db.sql.Date }
+  );
+  res.json({ data: recordset[0] || { rentalId: Number(req.params.id), endDate: output.NewEndDate } });
+}));
+
 // POST /api/rentals/complete-expired (Admin) - dong don het han ngay (binh thuong scheduler tu chay)
 router.post('/complete-expired', authorize('Admin'), asyncHandler(async (req, res) => {
   const { recordset } = await db.exec('dbo.usp_CompleteExpiredRentals');

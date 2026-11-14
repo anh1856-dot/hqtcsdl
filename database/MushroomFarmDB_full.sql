@@ -509,15 +509,23 @@ GO
 -- Doanh thu theo thang (chi tinh thanh toan thanh cong)
 CREATE OR ALTER VIEW dbo.vw_MonthlyRevenue
 AS
-SELECT  YEAR(p.PaidAt)  AS [Year],
-        MONTH(p.PaidAt) AS [Month],
-        COUNT(DISTINCT p.RentalId) AS RentalCount,
-        SUM(rn.TrayCount)          AS TrayCount,
-        SUM(p.Amount)              AS Revenue
-FROM dbo.Payments p
-JOIN dbo.Rentals rn ON rn.RentalId = p.RentalId
-WHERE p.Status = 'Paid'
-GROUP BY YEAR(p.PaidAt), MONTH(p.PaidAt);
+-- Don thue + cac lan gia han (BR14) deu la thanh toan: so don/so khay chi tinh
+-- o thanh toan dau tien cua don de khong dem trung; doanh thu cong tat ca.
+WITH P AS (
+    SELECT p.RentalId, p.Amount, p.PaidAt,
+           CASE WHEN p.PaymentId = MIN(p.PaymentId) OVER (PARTITION BY p.RentalId) THEN 1 ELSE 0 END AS IsFirst
+    FROM dbo.Payments p
+    WHERE p.Status = 'Paid'
+)
+SELECT  YEAR(P.PaidAt)  AS [Year],
+        MONTH(P.PaidAt) AS [Month],
+        SUM(P.IsFirst)                                            AS RentalCount,
+        SUM(CASE WHEN P.IsFirst = 1 THEN rn.TrayCount ELSE 0 END) AS TrayCount,
+        SUM(1 - P.IsFirst)                                        AS ExtensionCount,
+        SUM(P.Amount)                                             AS Revenue
+FROM P
+JOIN dbo.Rentals rn ON rn.RentalId = P.RentalId
+GROUP BY YEAR(P.PaidAt), MONTH(P.PaidAt);
 GO
 
 -- San luong thu hoach theo thang va loai nam
@@ -642,23 +650,49 @@ BEGIN
         THROW 50003, @Msg, 1;
     END;
 
+    -- BR14: khach chon loai nam co thoi gian sinh truong dai hon goi -> bao loi ro rang
+    DECLARE @Growth INT = (SELECT GrowthDays FROM dbo.MushroomTypes WHERE MushroomTypeId = @MushroomTypeId);
+    IF @Growth > @Duration
+    BEGIN
+        SET @Msg = CONCAT(N'Gói thuê quá ngắn cho loại nấm này (cần ', @Growth,
+                          N' ngày, gói chỉ có ', @Duration, N' ngày). Hãy chọn gói dài hơn.');
+        THROW 50009, @Msg, 1;
+    END;
+
     BEGIN TRY
         BEGIN TRANSACTION;
 
-        -- Khoa cac khay duoc chon de 2 khach thue cung luc khong lay trung khay
+        -- Khoa cac khay duoc chon de 2 khach thue cung luc khong lay trung khay.
+        -- BR14: chi lay khay co loai nam kip thu hoach trong thoi han goi
+        -- (khay chua gan loai nam thi loai nam chon luc bat dau trong).
         DECLARE @Picked TABLE (TrayId INT PRIMARY KEY);
         INSERT INTO @Picked (TrayId)
         SELECT TOP (@TrayCount) t.TrayId
         FROM dbo.Trays t WITH (UPDLOCK, HOLDLOCK)
         JOIN dbo.Rooms r ON r.RoomId = t.RoomId
+        LEFT JOIN dbo.MushroomTypes mt ON mt.MushroomTypeId = t.MushroomTypeId
         WHERE t.Status = 'Available'
           AND r.Status = 'Active'
           AND (@RoomId IS NULL OR t.RoomId = @RoomId)
           AND (@MushroomTypeId IS NULL OR t.MushroomTypeId = @MushroomTypeId)
+          AND (mt.GrowthDays IS NULL OR mt.GrowthDays <= @Duration)
         ORDER BY t.RoomId, t.TrayId;
 
         IF (SELECT COUNT(*) FROM @Picked) < @TrayCount
         BEGIN
+            -- Phan biet "het khay" voi "con khay nhung loai nam qua dai so voi goi"
+            DECLARE @AnyFree INT = (SELECT COUNT(*)
+                                    FROM dbo.Trays t
+                                    JOIN dbo.Rooms r ON r.RoomId = t.RoomId
+                                    WHERE t.Status = 'Available' AND r.Status = 'Active'
+                                      AND (@RoomId IS NULL OR t.RoomId = @RoomId)
+                                      AND (@MushroomTypeId IS NULL OR t.MushroomTypeId = @MushroomTypeId));
+            IF @AnyFree >= @TrayCount
+            BEGIN
+                SET @Msg = CONCAT(N'Gói thuê ', @Duration, N' ngày quá ngắn cho loại nấm của các khay còn trống ',
+                                  N'(chỉ ', (SELECT COUNT(*) FROM @Picked), N' khay phù hợp). Hãy chọn gói dài hơn.');
+                THROW 50009, @Msg, 1;
+            END;
             SET @Msg = CONCAT(N'Không đủ khay trống. Yêu cầu ', @TrayCount,
                               N', còn ', (SELECT COUNT(*) FROM @Picked), N'.');
             THROW 50004, @Msg, 1;
@@ -731,15 +765,23 @@ BEGIN
     BEGIN TRY
         BEGIN TRANSACTION;
 
-        DECLARE @TrayId INT, @TrayStatus VARCHAR(20);
-        SELECT @TrayId = TrayId, @TrayStatus = Status
-        FROM dbo.Trays WITH (UPDLOCK, HOLDLOCK)
-        WHERE TrayCode = @TrayCode;
+        DECLARE @TrayId INT, @TrayStatus VARCHAR(20), @Growth INT, @Msg NVARCHAR(400);
+        SELECT @TrayId = t.TrayId, @TrayStatus = t.Status, @Growth = mt.GrowthDays
+        FROM dbo.Trays t WITH (UPDLOCK, HOLDLOCK)
+        LEFT JOIN dbo.MushroomTypes mt ON mt.MushroomTypeId = t.MushroomTypeId
+        WHERE t.TrayCode = @TrayCode;
 
         IF @TrayId IS NULL
             THROW 50005, N'Mã khay không tồn tại.', 1;
         IF @TrayStatus <> 'Available'
             THROW 50006, N'Khay không ở trạng thái sẵn sàng cho thuê.', 1;
+        -- BR14: loai nam cua khay phai kip thu hoach trong thoi han goi
+        IF @Growth > @Duration
+        BEGIN
+            SET @Msg = CONCAT(N'Gói thuê quá ngắn cho loại nấm của khay này (cần ', @Growth,
+                              N' ngày, gói chỉ có ', @Duration, N' ngày). Hãy chọn gói dài hơn.');
+            THROW 50009, @Msg, 1;
+        END;
 
         DECLARE @Today DATE = CAST(SYSDATETIME() AS DATE);
 
@@ -801,23 +843,66 @@ BEGIN
 END;
 GO
 
--- Scheduler: ket thuc don thue het han. Bo qua don con khay dang trong / cho thu hoach
--- (BR14: nhom quyet dinh chinh sach gia han sau).
+-- Scheduler: ket thuc don thue het han.
+-- BR14: don con khay dang trong / cho thu hoach thi GIU LAI den khi thu hoach xong,
+-- khong tinh them phi; bao 1 lan cho khach va nhan vien. Thu hoach xong thi
+-- usp_RecordHarvest goi lai procedure nay voi @RentalId de dong don ngay.
+--   @RentalId = NULL : xu ly tat ca don (scheduler)
+--   @Silent   = 1    : khong tra ket qua SELECT (khi duoc goi tu procedure khac)
 CREATE OR ALTER PROCEDURE dbo.usp_CompleteExpiredRentals
+    @RentalId INT = NULL,
+    @Silent   BIT = 0
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
     DECLARE @Done TABLE (RentalId INT PRIMARY KEY, CustomerId INT);
+    DECLARE @Today DATE = CAST(SYSDATETIME() AS DATE);
 
     BEGIN TRANSACTION;
 
+    -- 1) Don qua han nhung con khay dang trong: bao 1 lan (khong dong don)
+    DECLARE @Overdue TABLE (RentalId INT PRIMARY KEY, CustomerId INT, EndDate DATE);
+    INSERT INTO @Overdue (RentalId, CustomerId, EndDate)
+    SELECT rn.RentalId, rn.CustomerId, rn.EndDate
+    FROM dbo.Rentals rn WITH (UPDLOCK)
+    WHERE rn.Status = 'Active'
+      AND rn.EndDate < @Today
+      AND (@RentalId IS NULL OR rn.RentalId = @RentalId)
+      AND EXISTS (SELECT 1
+                  FROM dbo.RentalTrays rt
+                  JOIN dbo.Trays t ON t.TrayId = rt.TrayId
+                  WHERE rt.RentalId = rn.RentalId AND rt.IsActive = 1
+                    AND t.Status IN ('Growing', 'ReadyToHarvest'))
+      -- Da bao roi thi thoi (kiem tra ca thong bao cua khach lan cua nhan vien,
+      -- vi khach co the tat loai thong bao Rental)
+      AND NOT EXISTS (SELECT 1 FROM dbo.Notifications n
+                      WHERE n.Type = 'Rental'
+                        AND (n.Content LIKE CONCAT(N'Đơn thuê #', rn.RentalId, N' đã đến hạn%')
+                          OR n.Content LIKE CONCAT(N'Đơn thuê #', rn.RentalId, N' đã quá hạn%')));
+
+    INSERT INTO dbo.Notifications (UserId, Type, Title, Content)
+    SELECT o.CustomerId, 'Rental', N'Đơn thuê đã đến hạn',
+           CONCAT(N'Đơn thuê #', o.RentalId, N' đã đến hạn ngày ', FORMAT(o.EndDate, 'dd/MM/yyyy'),
+                  N'. Khay vẫn đang trồng nên đơn được giữ đến khi thu hoạch xong, không tính thêm phí.')
+    FROM @Overdue o
+    UNION ALL
+    SELECT u.UserId, 'Rental', N'Đơn thuê quá hạn đang chờ thu hoạch',
+           CONCAT(N'Đơn thuê #', o.RentalId, N' đã quá hạn (', FORMAT(o.EndDate, 'dd/MM/yyyy'),
+                  N') nhưng còn khay đang trồng. Đơn sẽ tự đóng sau khi thu hoạch.')
+    FROM @Overdue o
+    CROSS JOIN dbo.Users u
+    JOIN dbo.Roles ro ON ro.RoleId = u.RoleId
+    WHERE ro.RoleName = 'Operator' AND u.Status = 'Active' AND u.IsDeleted = 0;
+
+    -- 2) Dong don het han khong con khay dang trong
     UPDATE rn SET Status = 'Completed'
     OUTPUT inserted.RentalId, inserted.CustomerId INTO @Done
     FROM dbo.Rentals rn
     WHERE rn.Status = 'Active'
-      AND rn.EndDate < CAST(SYSDATETIME() AS DATE)
+      AND rn.EndDate < @Today
+      AND (@RentalId IS NULL OR rn.RentalId = @RentalId)
       AND NOT EXISTS (SELECT 1
                       FROM dbo.RentalTrays rt
                       JOIN dbo.Trays t ON t.TrayId = rt.TrayId
@@ -841,7 +926,79 @@ BEGIN
 
     COMMIT TRANSACTION;
 
-    SELECT RentalId, CustomerId FROM @Done;
+    IF @Silent = 0
+        SELECT RentalId, CustomerId FROM @Done;
+END;
+GO
+
+-- UC22 / BR14: Gia han don thue co tra phi (khach tu gia han hoac nhan vien gia han ho).
+-- Gia han them @Terms ky theo goi cua don, gia = gia hien tai cua goi x so khay x so ky.
+-- Don da qua han (dang duoc giu cho thu hoach) thi tinh tu hom nay, khong thu tien nhung ngay da giu.
+CREATE OR ALTER PROCEDURE dbo.usp_ExtendRental
+    @RentalId      INT,
+    @ActorId       INT,
+    @Terms         INT = 1,
+    @PaymentMethod VARCHAR(20) = 'EWallet',
+    @NewEndDate    DATE = NULL OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @Role VARCHAR(20) = dbo.fn_GetActiveUserRole(@ActorId);
+    IF @Role IS NULL
+        THROW 50010, N'Bạn không có quyền thực hiện thao tác này.', 1;
+    IF @Terms IS NULL OR @Terms < 1 OR @Terms > 12
+        THROW 50052, N'Số kỳ gia hạn phải từ 1 đến 12.', 1;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- Khoa dong don thue: tranh 2 lan gia han cung luc hoac scheduler dong don giua chung
+        DECLARE @CustomerId INT, @Status VARCHAR(20), @EndDate DATE, @TrayCount INT,
+                @PackageId INT, @Duration INT, @Price DECIMAL(12,0), @PkgActive BIT;
+        SELECT @CustomerId = rn.CustomerId, @Status = rn.Status, @EndDate = rn.EndDate,
+               @TrayCount = rn.TrayCount, @PackageId = rn.PackageId,
+               @Duration = pk.DurationDays, @Price = pk.PricePerTray, @PkgActive = pk.IsActive
+        FROM dbo.Rentals rn WITH (UPDLOCK, HOLDLOCK)
+        JOIN dbo.RentalPackages pk ON pk.PackageId = rn.PackageId
+        WHERE rn.RentalId = @RentalId;
+
+        IF @CustomerId IS NULL
+            THROW 50050, N'Không tìm thấy đơn thuê.', 1;
+        IF @Role = 'Customer' AND @CustomerId <> @ActorId
+            THROW 50010, N'Đơn thuê này không phải của bạn.', 1;
+        IF @Status <> 'Active'
+            THROW 50051, N'Chỉ gia hạn được đơn thuê đang hoạt động.', 1;
+        IF @PkgActive = 0
+            THROW 50002, N'Gói thuê của đơn đã ngừng áp dụng, không gia hạn được.', 1;
+
+        DECLARE @Today DATE = CAST(SYSDATETIME() AS DATE);
+        DECLARE @Days INT = @Duration * @Terms;
+        DECLARE @Amount DECIMAL(14,0) = @Price * @TrayCount * @Terms;
+        SET @NewEndDate = DATEADD(DAY, @Days, CASE WHEN @EndDate < @Today THEN @Today ELSE @EndDate END);
+
+        UPDATE dbo.Rentals
+        SET EndDate = @NewEndDate, TotalAmount = TotalAmount + @Amount
+        WHERE RentalId = @RentalId;
+
+        INSERT INTO dbo.Payments (RentalId, Amount, Method, Status, TransactionRef, PaidAt)
+        VALUES (@RentalId, @Amount, @PaymentMethod, 'Paid',
+                CONCAT('EXT', FORMAT(SYSDATETIME(), 'yyyyMMddHHmmss'), @RentalId), SYSDATETIME());
+
+        INSERT INTO dbo.Notifications (UserId, Type, Title, Content)
+        VALUES (@CustomerId, 'Rental', N'Gia hạn đơn thuê thành công',
+                CONCAT(N'Đơn thuê #', @RentalId, N' được gia hạn thêm ', @Days, N' ngày, đến ',
+                       FORMAT(@NewEndDate, 'dd/MM/yyyy'), N'. Số tiền: ', FORMAT(@Amount, 'N0'), N' đ.'));
+
+        COMMIT TRANSACTION;
+
+        SELECT @RentalId AS RentalId, @NewEndDate AS EndDate, @Days AS ExtendedDays, @Amount AS Amount;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
 END;
 GO
 
@@ -1009,6 +1166,15 @@ BEGIN
                       N' kg. Hãy chọn nhận tại trại hoặc giao tận nơi.'),
                @TrayId
         FROM dbo.Trays WHERE TrayId = @TrayId;
+
+    -- BR14: don da qua han (dang giu cho thu hoach) -> dong ngay neu khong con khay nao dang trong
+    DECLARE @RentalId INT = (SELECT rt.RentalId
+                             FROM dbo.RentalTrays rt
+                             JOIN dbo.Rentals rn ON rn.RentalId = rt.RentalId
+                             WHERE rt.TrayId = @TrayId AND rt.IsActive = 1
+                               AND rn.Status = 'Active' AND rn.EndDate < CAST(SYSDATETIME() AS DATE));
+    IF @RentalId IS NOT NULL
+        EXEC dbo.usp_CompleteExpiredRentals @RentalId = @RentalId, @Silent = 1;
 
     COMMIT TRANSACTION;
 
@@ -1247,16 +1413,25 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
+    -- Moi don co the co nhieu thanh toan (thue + cac lan gia han):
+    -- RentalCount/TrayCount chi tinh o thanh toan dau tien cua don, tranh dem trung;
+    -- Revenue cong tat ca thanh toan; ExtensionCount = so lan gia han trong ky.
+    WITH P AS (
+        SELECT p.RentalId, p.Amount, p.PaidAt,
+               CASE WHEN p.PaymentId = MIN(p.PaymentId) OVER (PARTITION BY p.RentalId) THEN 1 ELSE 0 END AS IsFirst
+        FROM dbo.Payments p
+        WHERE p.Status = 'Paid'
+    )
     SELECT  pk.PackageId, pk.PackageName,
-            COUNT(DISTINCT rn.RentalId) AS RentalCount,
-            SUM(rn.TrayCount)           AS TrayCount,
-            SUM(p.Amount)               AS Revenue
-    FROM dbo.Payments p
-    JOIN dbo.Rentals rn        ON rn.RentalId = p.RentalId
+            SUM(P.IsFirst)                                           AS RentalCount,
+            SUM(CASE WHEN P.IsFirst = 1 THEN rn.TrayCount ELSE 0 END) AS TrayCount,
+            SUM(1 - P.IsFirst)                                       AS ExtensionCount,
+            SUM(P.Amount)                                            AS Revenue
+    FROM P
+    JOIN dbo.Rentals rn        ON rn.RentalId = P.RentalId
     JOIN dbo.RentalPackages pk ON pk.PackageId = rn.PackageId
-    WHERE p.Status = 'Paid'
-      AND p.PaidAt >= @FromDate
-      AND p.PaidAt <  DATEADD(DAY, 1, @ToDate)
+    WHERE P.PaidAt >= @FromDate
+      AND P.PaidAt <  DATEADD(DAY, 1, @ToDate)
     GROUP BY ROLLUP ((pk.PackageId, pk.PackageName))
     ORDER BY GROUPING(pk.PackageId), Revenue DESC;
 END;
@@ -1572,7 +1747,7 @@ CROSS JOIN (VALUES ('SEN',   N'Cảm biến môi trường', 'Sensor'),
 INSERT INTO dbo.RentalPackages (PackageName, DurationDays, PricePerTray, MaxTrays, Description) VALUES
 (N'Gói Trải nghiệm', 30, 150000,  2, N'Phù hợp người mới, 1 vụ nấm bào ngư'),
 (N'Gói Tiêu chuẩn',  60, 250000,  5, N'Theo dõi trọn vụ, kèm thông báo tiến độ'),
-(N'Gói Gia đình',    90, 350000, 10, N'Nhiều khay, phù hợp nấm chu kỳ dài');
+(N'Gói Gia đình',   120, 350000, 10, N'Nhiều khay, đủ thời gian cho nấm chu kỳ dài như linh chi');
 GO
 
 /* =====================================================================

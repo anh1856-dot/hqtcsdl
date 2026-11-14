@@ -53,7 +53,7 @@ Cơ sở dữ liệu cho hệ thống quản lý nuôi trồng nấm thông minh
 
 | Procedure | Chức năng |
 |---|---|
-| `usp_RentTrays` | Khách thuê 1 hoặc nhiều khay online (transaction, tự chọn khay trống) |
+| `usp_RentTrays` | Khách thuê 1 hoặc nhiều khay online (transaction, tự chọn khay trống, chỉ chọn loại nấm kịp thu hoạch trong thời hạn gói) |
 | `usp_AssignTrayToCustomer` | Operator gán khay cho khách tại trại |
 | `usp_LinkTrayByCode` | Khách đăng ký khay bằng mã |
 | `usp_StartCultivation` | Bắt đầu vụ trồng |
@@ -64,7 +64,8 @@ Cơ sở dữ liệu cho hệ thống quản lý nuôi trồng nấm thông minh
 | `usp_SimulateSensorData` | Giả lập IoT: sinh dữ liệu cảm biến |
 | `usp_ControlDevice` | Bật/tắt thiết bị thủ công |
 | `usp_UpdateAlertStatus` | Xác nhận / xử lý cảnh báo |
-| `usp_CompleteExpiredRentals` | Đóng đơn thuê hết hạn (chạy định kỳ) |
+| `usp_CompleteExpiredRentals` | Đóng đơn thuê hết hạn (chạy định kỳ). Đơn còn khay đang trồng được giữ đến khi thu hoạch (BR14) |
+| `usp_ExtendRental` | Gia hạn đơn thuê có trả phí (UC22, BR14) |
 | `usp_RevenueReport` | Báo cáo doanh thu theo gói |
 | `usp_SetNotificationSetting` | Admin bật/tắt một loại thông báo cho toàn hệ thống |
 | `usp_SetUserNotificationPref` | Người dùng bật/tắt một loại thông báo cho riêng mình |
