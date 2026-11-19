@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useRentals } from './RentalsManagementProvider.jsx';
 import { useRentalData } from './useRentalData.js';
-import { calendarDate, money, PAYMENT_METHODS, PAYMENT_STATUSES, positiveId, RENTAL_STATUSES, TRAY_STATUSES } from './model.mjs';
+import { calendarDate, isOverdue, money, PAYMENT_METHODS, PAYMENT_STATUSES, positiveId, RENTAL_STATUSES, TRAY_STATUSES } from './model.mjs';
 import { Empty, Loading, Message, Status, Table } from './ui.jsx';
+import ExtendRental from './ExtendRental.jsx';
 
 const trayColumns = [
   { key: 'TrayCode', label: 'Mã khay', render: (row) => <strong className="rm-code">{row.TrayCode}</strong> },
@@ -21,14 +22,16 @@ const paymentColumns = [
 ];
 
 /** Optional standalone read-only content; requires RentalsManagementProvider. */
-export function RentalDetails({ rentalId }) {
-  return <div className="rm-root"><RentalDetailsContent rentalId={rentalId} /></div>;
+export function RentalDetails({ rentalId, onChanged }) {
+  return <div className="rm-root"><RentalDetailsContent rentalId={rentalId} onChanged={onChanged} /></div>;
 }
 
-function RentalDetailsContent({ rentalId }) {
+function RentalDetailsContent({ rentalId, onChanged }) {
   const { allowed } = useRentals();
   const id = positiveId(rentalId);
   const resource = useRentalData(`/rentals/${id}`, { enabled: id !== null, detail: true });
+  // Giu thong bao gia han o day: tai lai chi tiet se dung lai phan gia han
+  const [extended, setExtended] = useState(null);
   if (!allowed) return <div role="alert" className="rm-empty">Bạn không có quyền xem đơn thuê.</div>;
   if (!id) return <Empty title="Không tìm thấy đơn thuê">Mã đơn thuê không hợp lệ.</Empty>;
   if (resource.loading) return <Loading>Đang tải chi tiết đơn thuê…</Loading>;
@@ -39,7 +42,7 @@ function RentalDetailsContent({ rentalId }) {
   const rental = resource.payload.data;
   return <div className="rm-details">
     <div className="rm-detail-top"><div><p className="rm-eyebrow">THÔNG TIN ĐƠN THUÊ</p><h3>Đơn #{rental.RentalId}</h3></div>
-      <Status value={rental.Status} labels={RENTAL_STATUSES} /></div>
+      <span><Status value={rental.Status} labels={RENTAL_STATUSES} />{isOverdue(rental) && <span className="rm-status rm-status-amber rm-overdue-badge">Quá hạn – chờ thu hoạch</span>}</span></div>
     <dl className="rm-facts">
       <div><dt>Khách hàng</dt><dd>{rental.CustomerName || '—'} <span className="rm-muted">(#{rental.CustomerId})</span></dd></div>
       <div><dt>Gói thuê</dt><dd>{rental.PackageName || '—'}</dd></div>
@@ -48,6 +51,8 @@ function RentalDetailsContent({ rentalId }) {
       <div><dt>Số khay</dt><dd>{rental.TrayCount ?? '—'}</dd></div>
       <div><dt>Tổng tiền đơn</dt><dd className="rm-total">{money(rental.TotalAmount)}</dd></div>
     </dl>
+    {extended && <Message>Đã gia hạn thêm {extended.ExtendedDays} ngày, đến {calendarDate(extended.EndDate)}. Đã thu {money(extended.Amount)}.</Message>}
+    <ExtendRental rental={rental} onStart={() => setExtended(null)} onExtended={(data) => { setExtended(data); resource.reload(); onChanged?.(); }} />
     <section className="rm-detail-section"><h3>Các khay thuộc đơn</h3><p className="rm-muted">Trạng thái khay được hiển thị theo thông tin hiện tại.</p>
       {rental.trays.length ? <Table label="Khay thuộc đơn thuê" columns={trayColumns} rows={rental.trays} rowKey="TrayId" /> : <Empty title="Đơn chưa có thông tin khay" />}
     </section>

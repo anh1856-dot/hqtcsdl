@@ -63,3 +63,27 @@ test('formats calendar dates without timezone shifts and VND including zero', ()
   assert.match(money(0), /0/);
   assert.equal(money(null), '—');
 });
+
+import { extendQuote, isOverdue, todayIso } from '../model.mjs';
+
+test('todayIso uses the local calendar date, not UTC', () => {
+  assert.equal(todayIso(new Date(2026, 10, 15, 1, 0)), '2026-11-15');
+  assert.equal(todayIso(new Date(2026, 0, 5, 23, 59)), '2026-01-05');
+});
+
+test('isOverdue: only Active rentals past their end date (BR14)', () => {
+  assert.equal(isOverdue({ Status: 'Active', EndDate: '2026-11-14' }, '2026-11-15'), true);
+  assert.equal(isOverdue({ Status: 'Active', EndDate: '2026-11-15' }, '2026-11-15'), false);
+  assert.equal(isOverdue({ Status: 'Completed', EndDate: '2026-11-01' }, '2026-11-15'), false);
+  assert.equal(isOverdue({ Status: 'Active', EndDate: null }, '2026-11-15'), false);
+});
+
+test('extendQuote matches usp_ExtendRental: price x trays x terms, from end date or today if overdue', () => {
+  const rental = { EndDate: '2026-12-15', DurationDays: 30, PricePerTray: 150000, TrayCount: 2 };
+  assert.deepEqual(extendQuote(rental, 1, '2026-11-15'), { days: 30, amount: 300000, newEndDate: '2027-01-14' });
+  assert.deepEqual(extendQuote(rental, '2', '2026-11-15'), { days: 60, amount: 600000, newEndDate: '2027-02-13' });
+  const overdue = { ...rental, EndDate: '2026-11-01' };
+  assert.equal(extendQuote(overdue, 1, '2026-11-15').newEndDate, '2026-12-15');
+  for (const bad of [0, 13, 1.5, 'x', null]) assert.equal(extendQuote(rental, bad, '2026-11-15'), null);
+  assert.equal(extendQuote({ ...rental, DurationDays: null }, 1, '2026-11-15'), null);
+});

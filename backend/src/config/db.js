@@ -37,6 +37,39 @@ function bindInputs(request, params) {
   }
 }
 
+/*
+ * Cot kieu DATE (ngay thue, ngay het han, lich thu hoach...) la "ngay lich", khong co gio.
+ * mssql tra ve Date luc 00:00 gio dia phuong, JSON hoa thanh "...T17:00:00.000Z" cua ngay hom truoc
+ * -> web/app cat 10 ky tu dau se lui 1 ngay. Doi ve chuoi 'YYYY-MM-DD' dung nhu trong database.
+ * Cot DATETIME2 (thoi diem) giu nguyen Date -> JSON ISO co 'Z', dung thoi diem.
+ */
+const pad = (n) => String(n).padStart(2, '0');
+function toDateOnly(value) {
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
+}
+function fixDateColumns(recordset) {
+  if (!recordset || !recordset.columns) return recordset;
+  const dateCols = Object.values(recordset.columns)
+    .filter((c) => c.type === sql.Date || c.type?.declaration === 'date')
+    .map((c) => c.name);
+  if (!dateCols.length) return recordset;
+  for (const row of recordset) {
+    for (const name of dateCols) {
+      if (row[name] instanceof Date) row[name] = toDateOnly(row[name]);
+    }
+  }
+  return recordset;
+}
+function fixOutputDates(output) {
+  for (const [key, value] of Object.entries(output || {})) {
+    // Tham so OUTPUT kieu Date (vd NewEndDate) khong co metadata -> chi doi khi dung 00:00 gio dia phuong
+    if (value instanceof Date && !value.getHours() && !value.getMinutes() && !value.getSeconds() && !value.getMilliseconds()) {
+      output[key] = toDateOnly(value);
+    }
+  }
+  return output;
+}
+
 /**
  * Chay cau lenh SQL co tham so, tra ve mang dong.
  *   await query('SELECT * FROM Trays WHERE RoomId = @roomId', { roomId: 1 })
@@ -46,7 +79,7 @@ async function query(text, params = {}) {
   const request = pool.request();
   bindInputs(request, params);
   const result = await request.query(text);
-  return result.recordset || [];
+  return fixDateColumns(result.recordset) || [];
 }
 
 /** Nhu query nhung chi lay dong dau tien (hoac null) */
@@ -61,7 +94,7 @@ async function queryMulti(text, params = {}) {
   const request = pool.request();
   bindInputs(request, params);
   const result = await request.query(text);
-  return result.recordsets || [];
+  return (result.recordsets || []).map(fixDateColumns);
 }
 
 /**
@@ -75,10 +108,11 @@ async function exec(procName, params = {}, outputs = {}) {
   bindInputs(request, params);
   for (const [name, type] of Object.entries(outputs)) request.output(name, type);
   const result = await request.execute(procName);
+  const recordsets = (result.recordsets || []).map(fixDateColumns);
   return {
-    recordset: result.recordset || [],
-    recordsets: result.recordsets || [],
-    output: result.output || {},
+    recordset: recordsets[0] || [],
+    recordsets,
+    output: fixOutputDates(result.output || {}),
   };
 }
 
