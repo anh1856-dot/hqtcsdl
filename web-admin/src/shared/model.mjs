@@ -93,6 +93,14 @@ export const timestamp = (v) =>
   v && !Number.isNaN(Date.parse(v))
     ? new Date(v).toLocaleString('vi-VN')
     : 'Chưa có dữ liệu';
+/** Ngay hom nay theo gio may (YYYY-MM-DD), khong dung ngay UTC. */
+export function todayIso(now = new Date()) {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+/** Khay lap lich thu hoach duoc (UC36): dang trong / cho thu hoach. */
+export function schedulableTrays(trays = []) {
+  return trays.filter((t) => ['Growing', 'ReadyToHarvest'].includes(t.Status));
+}
 export function query(path, values) {
   const params = new URLSearchParams(
     Object.entries(values).filter(([, v]) => v !== '' && v != null),

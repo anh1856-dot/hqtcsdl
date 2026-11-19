@@ -43,6 +43,37 @@ export function calendarDate(value) {
   return match ? `${match[3]}/${match[2]}/${match[1]}` : '—';
 }
 
+/** Ngay hom nay theo gio may (YYYY-MM-DD), khong dung ngay UTC. */
+export function todayIso(now = new Date()) {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+/** BR14: don Active da qua ngay het han (dang duoc giu cho den khi thu hoach xong). */
+export function isOverdue(rental, today = todayIso()) {
+  const end = /^\d{4}-\d{2}-\d{2}/.exec(String(rental?.EndDate || ''))?.[0];
+  return rental?.Status === 'Active' && Boolean(end) && end < today;
+}
+
+/**
+ * Uoc tinh gia han giong usp_ExtendRental: them terms ky theo goi cua don,
+ * tien = gia/khay hien tai x so khay x so ky; don qua han thi tinh tu hom nay.
+ */
+export function extendQuote(rental, terms, today = todayIso()) {
+  const n = Number(terms);
+  const duration = Number(rental?.DurationDays);
+  const price = Number(rental?.PricePerTray);
+  const trays = Number(rental?.TrayCount);
+  if (!Number.isInteger(n) || n < 1 || n > 12 || !(duration > 0) || !(price >= 0) || !(trays > 0)) return null;
+  const end = /^\d{4}-\d{2}-\d{2}/.exec(String(rental.EndDate || ''))?.[0];
+  if (!end) return null;
+  const base = end < today ? today : end;
+  const [y, m, d] = base.split('-').map(Number);
+  const next = new Date(y, m - 1, d + duration * n);
+  return { days: duration * n, amount: price * trays * n, newEndDate: todayIso(next) };
+}
+
+export const EXTEND_TERMS = [1, 2, 3, 6, 12];
+
 export function validateAssignment({ customer, packageId, trayCode, paymentMethod }, packages, trays) {
   const errors = {};
   if (!positiveId(customer?.UserId) || customer.Role !== 'Customer' || customer.Status !== 'Active' || customer.IsDeleted) {

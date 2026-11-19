@@ -10,7 +10,7 @@ import {
   Table,
   useActions,
 } from '../shared/Workbench.jsx';
-import { date, deliveryNext, query, timestamp, vnd } from '../shared/model.mjs';
+import { date, deliveryNext, query, schedulableTrays, timestamp, todayIso, vnd } from '../shared/model.mjs';
 
 export function Harvests() {
   const [filters, setFilters] = useState({
@@ -23,11 +23,75 @@ export function Harvests() {
     enabled: !badDates,
   });
   const actions = useActions(resource.reload);
+  // Khay dang trong de chon khi lap lich (UC36)
+  const trays = useQuery('/trays');
+  const scheduled = new Set(
+    (resource.payload?.data || [])
+      .filter((r) => r.Status === 'Scheduled')
+      .map((r) => r.TrayId),
+  );
+  const futureDate = (values) =>
+    values.scheduledDate && values.scheduledDate < todayIso()
+      ? { scheduledDate: 'Ngày thu hoạch phải từ hôm nay trở đi.' }
+      : {};
+  const dateField = (initial) => ({
+    name: 'scheduledDate',
+    label: 'Ngày thu hoạch',
+    type: 'date',
+    min: todayIso(),
+    required: true,
+    initial,
+  });
+  const noteField = {
+    name: 'note',
+    label: 'Ghi chú',
+    type: 'textarea',
+    maxLength: 500,
+  };
+  function openSchedule() {
+    const options = schedulableTrays(trays.payload?.data || []).map((t) => ({
+      value: String(t.TrayId),
+      label: `${t.TrayCode} · ${t.RoomName}${t.CustomerName ? ' · ' + t.CustomerName : ''}${
+        t.ExpectedHarvestDate ? ' · dự kiến ' + date(t.ExpectedHarvestDate) : ''
+      }${scheduled.has(t.TrayId) ? ' (đã có lịch, sẽ đổi ngày)' : ''}`,
+    }));
+    actions.open({
+      title: 'Lập lịch thu hoạch',
+      path: '/harvests',
+      message:
+        'Chỉ lập lịch cho khay đang trồng. Khay đã có lịch đang chờ thì lịch cũ được đổi sang ngày mới. Khách thuê nhận thông báo.',
+      submitLabel: 'Lập lịch',
+      fields: [
+        { name: 'trayId', label: 'Khay', options, required: true, wide: true },
+        dateField(todayIso()),
+        noteField,
+      ],
+      check: (values) =>
+        options.length ? futureDate(values) : { form: 'Không có khay nào đang trồng.' },
+      body: (values) => ({
+        trayId: Number(values.trayId),
+        scheduledDate: values.scheduledDate,
+        note: values.note.trim() || undefined,
+      }),
+    });
+  }
   return (
     <Page
       title="Thu hoạch"
-      description="Lịch và kết quả thu hoạch; ghi nhận theo khay có lịch hợp lệ."
-      actions={<button onClick={resource.reload}>Làm mới</button>}
+      description="Lịch và kết quả thu hoạch; lập lịch cho khay đang trồng, ghi nhận theo khay có lịch hợp lệ."
+      actions={
+        <>
+          <button
+            className="wa-primary"
+            disabled={trays.loading || Boolean(trays.error)}
+            title={trays.error ? 'Không tải được danh sách khay' : undefined}
+            onClick={openSchedule}
+          >
+            Lập lịch thu hoạch
+          </button>
+          <button onClick={resource.reload}>Làm mới</button>
+        </>
+      }
     >
       <Notice success={actions.success} />
       <Filters
@@ -72,6 +136,7 @@ export function Harvests() {
                 col('Note', 'Ghi chú'),
                 col('action', 'Thao tác', (r) =>
                   r.Status === 'Scheduled' ? (
+                    <div className="wa-row-actions">
                     <button
                       onClick={() =>
                         actions.open({
@@ -107,6 +172,44 @@ export function Harvests() {
                     >
                       Ghi nhận
                     </button>
+                    <button
+                      onClick={() =>
+                        actions.open({
+                          title: `Đổi lịch thu hoạch ${r.TrayCode}`,
+                          path: '/harvests',
+                          message: `Lịch hiện tại: ${date(r.ScheduledDate)}. Khách thuê nhận thông báo ngày mới.`,
+                          submitLabel: 'Đổi lịch',
+                          fields: [dateField(String(r.ScheduledDate || '').slice(0, 10)), noteField],
+                          check: futureDate,
+                          body: (values) => ({
+                            trayId: r.TrayId,
+                            scheduledDate: values.scheduledDate,
+                            note: values.note.trim() || undefined,
+                          }),
+                        })
+                      }
+                    >
+                      Đổi lịch
+                    </button>
+                    <button
+                      className="wa-text-danger"
+                      onClick={() =>
+                        actions.open({
+                          title: `Hủy lịch thu hoạch ${r.TrayCode}`,
+                          path: `/harvests/${r.HarvestId}/cancel`,
+                          method: 'PATCH',
+                          danger: true,
+                          submitLabel: 'Hủy lịch',
+                          message:
+                            'Hủy lịch đang chờ (ví dụ khay chậm phát triển). Muốn thu hoạch sau này cần lập lịch lại.',
+                          fields: [{ ...noteField, label: 'Lý do' }],
+                          body: (values) => ({ note: values.note.trim() || undefined }),
+                        })
+                      }
+                    >
+                      Hủy lịch
+                    </button>
+                    </div>
                   ) : (
                     'Đã kết thúc xử lý'
                   ),

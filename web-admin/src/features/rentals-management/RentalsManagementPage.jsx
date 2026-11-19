@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useRentals } from './RentalsManagementProvider.jsx';
 import { useRentalData } from './useRentalData.js';
-import { calendarDate, money, RENTAL_STATUSES, rentalsPath } from './model.mjs';
+import { calendarDate, isOverdue, money, RENTAL_STATUSES, rentalsPath } from './model.mjs';
 import CustomerPicker from './CustomerPicker.jsx';
 import AssignTrayDialog from './AssignTrayDialog.jsx';
 import { RentalDetails } from './RentalDetails.jsx';
@@ -17,7 +17,8 @@ export function RentalsManagementPage() {
     { key: 'RentalId', label: 'Mã đơn', render: (row) => <strong className="rm-code">#{row.RentalId}</strong> },
     { key: 'CustomerName', label: 'Khách hàng', render: (row) => <><strong>{row.CustomerName}</strong><span className="rm-secondary">Mã khách #{row.CustomerId}</span></> },
     { key: 'PackageName', label: 'Gói thuê' },
-    { key: 'StartDate', label: 'Thời gian thuê', render: (row) => <>{calendarDate(row.StartDate)}<span className="rm-secondary">đến {calendarDate(row.EndDate)}</span></> },
+    { key: 'StartDate', label: 'Thời gian thuê', render: (row) => <>{calendarDate(row.StartDate)}<span className="rm-secondary">đến {calendarDate(row.EndDate)}</span>
+      {isOverdue(row) && <span className="rm-secondary rm-overdue-text">Quá hạn – chờ thu hoạch</span>}</> },
     { key: 'TrayCount', label: 'Số khay' },
     { key: 'TotalAmount', label: 'Tổng tiền', render: (row) => <span className="rm-amount">{money(row.TotalAmount)}</span> },
     { key: 'Status', label: 'Trạng thái', render: (row) => <Status value={row.Status} labels={RENTAL_STATUSES} /> },
@@ -57,7 +58,7 @@ export function RentalsManagementPage() {
       </div>
       {modal?.type === 'assign' && <AssignTrayDialog onClose={() => setModal(null)} onCreated={assignmentCreated} />}
       {modal?.type === 'details' && <Modal title={`Chi tiết đơn thuê #${modal.id}`} wide onClose={() => setModal(null)}>
-        <RentalDetails rentalId={modal.id} /><footer className="rm-modal-footer rm-details-footer">
+        <RentalDetails rentalId={modal.id} onChanged={resource.reload} /><footer className="rm-modal-footer rm-details-footer">
           <button type="button" className="rm-button" onClick={() => setModal(null)}>Đóng</button></footer>
       </Modal>}
     </>}
