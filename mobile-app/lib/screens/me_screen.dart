@@ -28,7 +28,7 @@ class MeScreen extends StatelessWidget {
           children: [
             Card(
               child: ListTile(
-                leading: const Text('🧑‍🌾', style: TextStyle(fontSize: 34)),
+                leading: const CircleAvatar(radius: 22, backgroundColor: Color(0xFFE3EFE5), child: Icon(Icons.person, color: kGreen)),
                 title: Text(u['FullName']?.toString() ?? '',
                     style: const TextStyle(fontWeight: FontWeight.w800)),
                 subtitle: Text(u['Email']?.toString() ?? ''),

@@ -112,26 +112,33 @@ String fmtMoney(dynamic n) {
   return '${v < 0 ? '-' : ''}${b.toString()}đ';
 }
 
-/// Giờ trong DB là giờ địa phương của máy chủ SQL nên hiển thị nguyên giá trị (coi như UTC).
-DateTime? parseUtc(dynamic v) {
+final _dateOnly = RegExp(r'^\d{4}-\d{2}-\d{2}$');
+
+/// Đọc giá trị ngày / giờ từ API:
+/// - Cột ngày (StartDate, EndDate, ScheduledDate...) backend trả 'YYYY-MM-DD': giữ nguyên ngày lịch.
+/// - Cột thời điểm (CreatedAt, PaidAt, RecordedAt...) trả ISO có 'Z' (UTC): đổi sang giờ máy.
+DateTime? parseTime(dynamic v) {
   if (v == null) return null;
-  final d = DateTime.tryParse(v.toString());
+  final s = v.toString();
+  final d = DateTime.tryParse(s);
   if (d == null) return null;
-  if (d.isUtc) return d;
-  return DateTime.utc(
-      d.year, d.month, d.day, d.hour, d.minute, d.second, d.millisecond);
+  if (_dateOnly.hasMatch(s)) return d;
+  return d.toLocal();
 }
+
+/// Ngày hôm nay (giờ máy), dạng 'YYYY-MM-DD'.
+String todayIso() => isoDate(DateTime.now());
 
 String _p2(int n) => n.toString().padLeft(2, '0');
 
 String fmtDate(dynamic v) {
-  final d = parseUtc(v);
+  final d = parseTime(v);
   if (d == null) return '–';
   return '${_p2(d.day)}/${_p2(d.month)}/${d.year}';
 }
 
 String fmtDateTime(dynamic v) {
-  final d = parseUtc(v);
+  final d = parseTime(v);
   if (d == null) return '–';
   return '${_p2(d.hour)}:${_p2(d.minute)} ${_p2(d.day)}/${_p2(d.month)}';
 }

@@ -20,14 +20,94 @@ class _RentScreenState extends State<RentScreen> {
   Future<Map<String, dynamic>> _load() async {
     final results = await Future.wait([
       Api.i.get('/packages', auth: false),
-      Api.i.get('/trays/available'),
       Api.i.get('/rentals?pageSize=20'),
     ]);
+    final pkgs = asList(results[0]['data']).map(asMap).toList();
+    // BR14: chỉ đếm khay có loại nấm kịp thu hoạch trong thời hạn từng gói
+    final avail = await Future.wait(pkgs.map(
+        (p) => Api.i.get('/trays/available?packageId=${p['PackageId']}')));
     return {
-      'pkgs': asList(results[0]['data']),
-      'avail': asList(results[1]['data']),
-      'rentals': asList(results[2]['data']),
+      'pkgs': pkgs,
+      'availByPkg': {
+        for (var i = 0; i < pkgs.length; i++)
+          pkgs[i]['PackageId'].toString(): asList(avail[i]['data']),
+      },
+      'rentals': asList(results[1]['data']),
     };
+  }
+
+  /// UC22 / BR14: gia hạn đơn thuê (POST /rentals/:id/extend).
+  Future<void> _extend(Map<String, dynamic> rental, Map<String, dynamic>? pkg,
+      Future<void> Function() reload) async {
+    final duration = toI(pkg?['DurationDays']);
+    final price = toD(pkg?['PricePerTray']) ?? 0;
+    final trays = toI(rental['TrayCount']);
+    var terms = 1;
+    var method = 'EWallet';
+    String newEnd(int n) {
+      final end = rental['EndDate']?.toString() ?? '';
+      final today = todayIso();
+      final base = parseTime(end.compareTo(today) < 0 ? today : end) ?? DateTime.now();
+      return isoDate(DateTime(base.year, base.month, base.day + duration * n));
+    }
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setD) => AlertDialog(
+          title: Text('Gia hạn đơn #${rental['RentalId']}'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              DropdownButtonFormField<int>(
+                initialValue: terms,
+                decoration: InputDecoration(labelText: 'Số kỳ ($duration ngày / kỳ)'),
+                items: [
+                  for (final n in const [1, 2, 3, 6, 12])
+                    DropdownMenuItem(value: n, child: Text('$n kỳ (${n * duration} ngày)')),
+                ],
+                onChanged: (v) => setD(() => terms = v ?? 1),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (final k in payVi.keys.where((k) => k != 'Cash'))
+                    ChoiceChip(
+                      label: Text(payVi[k]!),
+                      selected: method == k,
+                      onSelected: (_) => setD(() => method = k),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text('Hết hạn mới (dự kiến): ${fmtDate(newEnd(terms))}'),
+              Text('Số tiền: ${fmtMoney(price * trays * terms)}',
+                  style: const TextStyle(fontWeight: FontWeight.w800, color: kGreen)),
+              const Text('Tính theo giá gói hiện tại.',
+                  style: TextStyle(fontSize: 12, color: Colors.black54)),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Hủy')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Gia hạn')),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      final res = await Api.i.post(
+          '/rentals/${rental['RentalId']}/extend', {'terms': terms, 'paymentMethod': method});
+      final d = asMap(res['data']);
+      if (!mounted) return;
+      toast(context, 'Đã gia hạn thêm ${d['ExtendedDays']} ngày, đến ${fmtDate(d['EndDate'])}.');
+      Api.i.refreshUnread();
+      await reload();
+    } catch (e) {
+      if (mounted) toast(context, e.toString(), err: true);
+    }
   }
 
   Future<void> _submit(Map<String, dynamic> pkg, Map<String, dynamic>? combo) async {
@@ -35,7 +115,7 @@ class _RentScreenState extends State<RentScreen> {
     final ok = await confirmBox(
       context,
       'Xác nhận thuê khay',
-      'Gói ${pkg['PackageName']} · $_count khay\n'
+      '${pkg['PackageName']} · $_count khay\n'
           'Thời hạn ${pkg['DurationDays']} ngày\n'
           'Thanh toán ${vi(payVi, _method)}: ${fmtMoney(total)}',
       'Thanh toán',
@@ -74,19 +154,19 @@ class _RentScreenState extends State<RentScreen> {
       load: _load,
       builder: (context, data, reload) {
         final pkgs = asList(data['pkgs']).map(asMap).toList();
-        final avail = asList(data['avail']).map(asMap).toList();
+        final availByPkg = asMap(data['availByPkg']);
         final rentals = asList(data['rentals']).map(asMap).toList();
 
         if (!pkgs.any((p) => p['PackageId'].toString() == _packageId)) {
           _packageId = pkgs.isNotEmpty ? pkgs.first['PackageId'].toString() : null;
           _count = 1;
         }
-        if (_combo >= avail.length) _combo = -1;
-
         Map<String, dynamic>? pkg;
         for (final p in pkgs) {
           if (p['PackageId'].toString() == _packageId) pkg = p;
         }
+        final avail = asList(availByPkg[_packageId]).map(asMap).toList();
+        if (_combo >= avail.length) _combo = -1;
         final combo = _combo >= 0 ? avail[_combo] : null;
         final totalAvail = avail.fold<int>(0, (s, a) => s + toI(a['AvailableTrays']));
         var maxCount = 0;
@@ -120,6 +200,7 @@ class _RentScreenState extends State<RentScreen> {
                   onTap: () => setState(() {
                     _packageId = p['PackageId'].toString();
                     _count = 1;
+                    _combo = -1; // danh sách phòng thay đổi theo gói
                   }),
                   child: Padding(
                     padding: const EdgeInsets.all(14),
@@ -160,7 +241,8 @@ class _RentScreenState extends State<RentScreen> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       DropdownButtonFormField<int>(
-                        value: _combo,
+                        key: ValueKey('combo-$_packageId'),
+                        initialValue: _combo,
                         isExpanded: true,
                         decoration: const InputDecoration(labelText: 'Phòng / loại nấm'),
                         items: [
@@ -287,6 +369,28 @@ class _RentScreenState extends State<RentScreen> {
                             style: const TextStyle(fontSize: 13, color: Colors.black54)),
                         if (x['TrayCodes'] != null && x['TrayCodes'].toString().isNotEmpty)
                           Text('Khay: ${x['TrayCodes']}', style: const TextStyle(fontSize: 13)),
+                        if (x['Status'] == 'Active' &&
+                            (x['EndDate']?.toString() ?? '').compareTo(todayIso()) < 0)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 6),
+                            child: Text(
+                                'Đơn đã đến hạn nhưng khay còn đang trồng, được giữ đến khi thu hoạch xong (không tính thêm phí).',
+                                style: TextStyle(fontSize: 12, color: Color(0xFF9A5B00))),
+                          ),
+                        if (x['Status'] == 'Active')
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton.icon(
+                              onPressed: () => _extend(
+                                  x,
+                                  pkgs.cast<Map<String, dynamic>?>().firstWhere(
+                                      (p) => p?['PackageId'].toString() == x['PackageId'].toString(),
+                                      orElse: () => null),
+                                  reload),
+                              icon: const Icon(Icons.update),
+                              label: const Text('Gia hạn'),
+                            ),
+                          ),
                       ],
                     ),
                   ),

@@ -1,50 +1,45 @@
 # Nấm Smart – app khách hàng (Flutter)
 
-Bản viết lại bằng Flutter của app khách hàng (Gói công việc 3 trong đề tài). Gọi REST API của `backend/` (xem `backend/API.md`).
+App khách hàng của đề tài (gói công việc 3), gọi REST API của `backend/` (xem `backend/API.md`).
 
-Chức năng: đăng nhập/đăng ký · khay của tôi + môi trường + biểu đồ · thuê khay · thu hoạch & giao nhận · thông báo · tài khoản.
-
-> Lưu ý: mã nguồn này được viết khi chưa có Flutter SDK để biên dịch thử. Nếu `flutter run` báo lỗi, gửi nguyên văn lỗi để sửa.
+Chức năng: đăng nhập / đăng ký · khay của tôi (môi trường, biểu đồ, nhật ký) · nhập mã khay · thuê khay · gia hạn đơn thuê ·
+thu hoạch & giao nhận · thông báo · tài khoản.
 
 ## Cài đặt (làm một lần)
 
-1. Cài Flutter SDK: https://docs.flutter.dev/get-started/install (kèm Android Studio để có giả lập Android). Kiểm tra bằng `flutter doctor`.
-2. Giải nén thư mục này, mở terminal trong `nam_smart_flutter/`, chạy:
+1. Cài Flutter SDK: https://docs.flutter.dev/get-started/install, kiểm tra bằng `flutter doctor`.
+   Muốn chạy trên Android thì cài thêm Android Studio (để có Android SDK và máy ảo).
+2. Trong thư mục `mobile-app/` chạy:
 
 ```
-flutter create --platforms=android,web --project-name nam_smart .
 flutter pub get
 ```
 
-(`flutter create .` chỉ sinh thêm thư mục `android/`, `web/`… và giữ nguyên `lib/`, `pubspec.yaml`.)
-Xóa file `test/widget_test.dart` do lệnh trên tạo ra (nó tham chiếu `MyApp`, không dùng).
-
-3. Android cần quyền Internet và cho phép HTTP thường (backend chạy `http://`). Mở `android/app/src/main/AndroidManifest.xml`, thêm trước thẻ `<application`:
-
-```xml
-<uses-permission android:name="android.permission.INTERNET"/>
-```
-
-và thêm thuộc tính vào thẻ `<application`:
-
-```xml
-android:usesCleartextTraffic="true"
-```
+Thư mục `android/`, `web/` và cấu hình Android (quyền Internet, cho phép HTTP) đã có sẵn trong repo, không cần `flutter create`.
 
 ## Chạy
 
-1. Chạy backend (`backend/`, `npm run dev`, cổng 3000).
-2. Chạy app: `flutter run` (chọn giả lập Android hoặc `-d chrome`).
+1. Chạy backend (`backend/`, `npm start`, cổng 3000) với database đã tạo bằng `database\run_all.ps1`.
+2. Chạy app:
+   - Trình duyệt: `flutter run -d chrome` (hoặc `flutter build web` rồi phục vụ thư mục `build/web`).
+   - Máy ảo Android: `flutter run` (chọn thiết bị).
+3. Đăng nhập tài khoản khách mẫu, ví dụ `an.le@example.test` / `Mushroom@123`.
 
-Địa chỉ API mặc định: giả lập Android `http://10.0.2.2:3000/api`, các nền tảng khác `http://localhost:3000/api`. Điện thoại thật: vào "Cài đặt kết nối máy chủ" ở màn hình đăng nhập, nhập `http://<IP máy tính>:3000/api` (cùng Wi-Fi). Chạy trên web (`-d chrome`) cần backend bật CORS.
+Địa chỉ API mặc định: máy ảo Android `http://10.0.2.2:3000/api`, các nền tảng khác `http://localhost:3000/api`.
+Điện thoại thật: ở màn hình đăng nhập mở "Cài đặt kết nối máy chủ", nhập `http://<IP máy chạy backend>:3000/api`
+(cùng Wi-Fi; tường lửa Windows phải cho phép cổng 3000).
 
-## Build file cài đặt
+## Kiểm tra
 
-`flutter build apk` → `build/app/outputs/flutter-apk/app-release.apk`.
+```
+flutter analyze
+flutter build web
+```
 
-## Cấu trúc
+## Quy ước dữ liệu từ API
 
-- `lib/main.dart` – khởi động, giao diện, đăng nhập/đăng xuất
-- `lib/api.dart` – gọi API, lưu token
-- `lib/util.dart` – nhãn tiếng Việt, định dạng, widget dùng chung
-- `lib/screens/` – các màn hình (auth, home_shell, trays, rent, harvest, notif, me)
+- **Ngày** (`StartDate`, `EndDate`, `ScheduledDate`, `ExpectedHarvestDate`…): chuỗi `YYYY-MM-DD`, hiển thị thẳng.
+- **Thời điểm** (`CreatedAt`, `PaidAt`, `RecordedAt`, `LoggedAt`…): ISO có `Z` (UTC), đổi sang giờ máy trước khi hiển thị.
+  Cả hai được xử lý trong `parseTime()` ở `lib/util.dart`.
+- Lỗi nghiệp vụ: hiện thẳng `error.message` của backend (ví dụ `DB_50009` khi gói thuê quá ngắn so với loại nấm).
+- Camera chỉ ở mức tham khảo: nút "Xem camera trực tiếp" mở URL camera đã cấu hình, dữ liệu mẫu là link giả.
