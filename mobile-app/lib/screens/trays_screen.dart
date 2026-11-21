@@ -503,7 +503,7 @@ class EnvChart extends StatelessWidget {
     final pts = <List<double>>[];
     for (final raw in rows) {
       final row = asMap(raw);
-      final t = parseUtc(row['Time']);
+      final t = parseTime(row['Time']);
       final v = toD(row[metric.key]);
       if (t != null && v != null) pts.add([t.millisecondsSinceEpoch.toDouble(), v]);
     }
@@ -565,7 +565,7 @@ class _LinePainter extends CustomPainter {
   }
 
   String _fmtT(double ms) {
-    final d = DateTime.fromMillisecondsSinceEpoch(ms.round(), isUtc: true);
+    final d = DateTime.fromMillisecondsSinceEpoch(ms.round()); // giờ máy
     String p(int n) => n.toString().padLeft(2, '0');
     return '${p(d.day)}/${p(d.month)} ${p(d.hour)}:${p(d.minute)}';
   }
