@@ -5,6 +5,8 @@ App khách hàng của đề tài (gói công việc 3), gọi REST API của `b
 Chức năng: đăng nhập / đăng ký · khay của tôi (môi trường, biểu đồ, nhật ký) · nhập mã khay · thuê khay · gia hạn đơn thuê ·
 thu hoạch & giao nhận · thông báo · tài khoản.
 
+**Chỉ cần cài app lên điện thoại?** Tải file APK có sẵn ở [Releases](https://github.com/anh1856-dot/hqtcsdl/releases/latest), không cần cài Flutter.
+
 ## Cài đặt (làm một lần)
 
 1. Cài Flutter SDK: https://docs.flutter.dev/get-started/install, kiểm tra bằng `flutter doctor`.
