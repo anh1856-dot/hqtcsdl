@@ -11,15 +11,16 @@
 | [`database/`](database/) | CSDL, procedure, trigger, phân quyền, backup | SQL Server | ✅ |
 | [`backend/`](backend/) | RESTful API + giả lập IoT ([danh sách API](backend/API.md)) | Node.js, Express | ✅ |
 | [`web-admin/`](web-admin/) | Web cho Admin / Operator ([cách chạy](web-admin/README.md)) | ReactJS (Vite) | ✅ |
-| `mobile-app/` | App cho khách hàng (chưa có, nhóm app tạo thư mục này trong PR đầu tiên) | Flutter | ⏳ |
+| [`mobile-app/`](mobile-app/) | App cho khách hàng ([cách chạy, build APK](mobile-app/README.md)) | Flutter | ✅ |
 | [`app-customer/`](app-customer/) | Bản mẫu HTML/JS **chỉ để tham khảo** cho nhóm app (luồng màn hình, cách gọi API), không phải sản phẩm cuối | HTML, JS | 📎 |
 
 ## Chạy nhanh
 
 1. Tạo database: `database\run_all.ps1` (xem `database/README.md`). Sau mỗi lần `git pull` có sửa `database/` thì chạy lại.
 2. Chạy API: `backend/README.md`, kiểm tra bằng `npm run test:api`.
-3. Chạy web: `web-admin/README.md`.
-4. Web / app gọi API tại `http://localhost:3000/api`. Chạy app trên điện thoại thật thì dùng IP máy chạy backend thay cho `localhost`.
+3. Chạy web quản trị: `web-admin/README.md`.
+4. Chạy app khách hàng: `mobile-app/README.md` (`flutter run`, hoặc build file APK để cài lên điện thoại Android).
+5. Web / app gọi API tại `http://localhost:3000/api`. Chạy app trên điện thoại thật thì dùng IP máy chạy backend thay cho `localhost`.
 
 Tài khoản mẫu: `admin@mushroomfarm.test`, `operator1@mushroomfarm.test`, `an.le@example.test`… mật khẩu chung `Mushroom@123` (chỉ dùng cho môi trường dev).
 
