@@ -144,7 +144,7 @@ Chỉ thao tác ghi khi nhóm đã xác định là môi trường dev phù hợ
 - `src/App.jsx`: HashRouter, guard vai trò, layout/menu và tích hợp provider cũ.
 - `src/shared/`: API client, phiên đăng nhập, GET/polling, bảng/form/dialog, định dạng và biểu đồ SVG.
 - `src/pages/`: nhóm trang mới, gọi endpoint thật; không import dữ liệu test.
-- `src/features/basic-management/`, `rentals-management/`: giữ nguyên mã từ PR #4/#5; xem tài liệu bàn giao riêng trong `docs/`.
+- `src/features/basic-management/`, `rentals-management/`: quản lý loại nấm, gói thuê, phòng, người dùng và đơn thuê (từ PR #4/#5).
 - `tests/e2e/`: mock chỉ trong Playwright, không nằm trong luồng ứng dụng.
 - `.vscode/` tại root: Task, cấu hình Live Server và extension được khuyến nghị, không đổi settings global.
 
@@ -156,4 +156,4 @@ npm run test:e2e
 
 Browser test mặc định dùng Chrome headless. Nếu máy chưa có Chrome, cài browser theo Playwright, ví dụ `npx playwright install chromium` rồi chọn channel tương ứng qua `PW_CHANNEL=chromium`. Biến `WEB_ADMIN_TEST_URL` cho phép kiểm tra preview/Go Live đang chạy thay vì dev. Không dùng test có ghi trên backend thật.
 
-Xem [kết quả xác minh và giới hạn](docs/web-admin-validation.md). Không có cấu hình lint/typecheck có sẵn; source JSX được kiểm tra bằng build và các bài kiểm thử.
+Không có cấu hình lint/typecheck có sẵn; source JSX được kiểm tra bằng build và các bài kiểm thử.
