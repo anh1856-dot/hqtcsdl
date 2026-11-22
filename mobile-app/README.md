@@ -32,7 +32,10 @@ Thư mục `android/`, `web/` và cấu hình Android (quyền Internet, cho ph�
 ## Build file APK (cài lên điện thoại Android)
 
 Cần thêm (ngoài Flutter): **JDK 17** và **Android SDK** có `platform-tools`, `platforms/android-36`, `build-tools/36.0.0`
-(cài bằng Android Studio, hoặc Android command-line tools: `android sdk install platform-tools platforms/android-36 build-tools/36.0.0`).
+và **NDK `28.2.13676358`** (phiên bản Flutter 3.50 yêu cầu, khoảng 2 GB sau khi giải nén).
+Cài bằng Android Studio (SDK Manager), hoặc Android command-line tools:
+`android sdk install platform-tools platforms/android-36 build-tools/36.0.0 ndk/28.2.13676358`.
+Nên cài NDK trước: bản `sdkmanager` mới không tự cài NDK được khi Gradle build.
 Khi cài Android SDK phải đồng ý điều khoản Android SDK của Google. Trỏ Flutter tới JDK và SDK:
 
 ```
