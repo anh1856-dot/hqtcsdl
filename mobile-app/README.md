@@ -29,6 +29,36 @@ Thư mục `android/`, `web/` và cấu hình Android (quyền Internet, cho ph�
 Điện thoại thật: ở màn hình đăng nhập mở "Cài đặt kết nối máy chủ", nhập `http://<IP máy chạy backend>:3000/api`
 (cùng Wi-Fi; tường lửa Windows phải cho phép cổng 3000).
 
+## Build file APK (cài lên điện thoại Android)
+
+Cần thêm (ngoài Flutter): **JDK 17** và **Android SDK** có `platform-tools`, `platforms/android-36`, `build-tools/36.0.0`
+và **NDK `28.2.13676358`** (phiên bản Flutter 3.50 yêu cầu, khoảng 2 GB sau khi giải nén).
+Cài bằng Android Studio (SDK Manager), hoặc Android command-line tools:
+`android sdk install platform-tools platforms/android-36 build-tools/36.0.0 ndk/28.2.13676358`.
+Nên cài NDK trước: bản `sdkmanager` mới không tự cài NDK được khi Gradle build.
+Khi cài Android SDK phải đồng ý điều khoản Android SDK của Google. Trỏ Flutter tới JDK và SDK:
+
+```
+flutter config --android-sdk <thư mục Android SDK> --jdk-dir <thư mục JDK 17>
+flutter doctor
+```
+
+`flutter doctor` phải báo `[√] Android toolchain`. Sau đó trong `mobile-app/`:
+
+```
+flutter build apk --release
+```
+
+File APK nằm ở `build/app/outputs/flutter-apk/app-release.apk` (không commit file này lên repo).
+Bản này ký bằng khoá debug: cài thử / demo được, chưa đưa lên Google Play.
+
+**Cài lên điện thoại:**
+
+1. Chép `app-release.apk` sang điện thoại (cáp USB, Zalo, Google Drive…) rồi mở file.
+2. Cho phép "Cài ứng dụng không rõ nguồn gốc" cho ứng dụng dùng để mở file khi Android hỏi, rồi cài.
+3. Điện thoại và máy chạy backend **cùng Wi-Fi**. Mở app → "Cài đặt kết nối máy chủ" → nhập `http://<IP máy chạy backend>:3000/api`
+   (xem IP bằng `ipconfig`, mục Wi-Fi → IPv4). Tường lửa Windows phải cho phép Node.js nhận kết nối.
+
 ## Kiểm tra
 
 ```
