@@ -12,7 +12,6 @@
 | [`backend/`](backend/) | RESTful API + giả lập IoT ([danh sách API](backend/API.md)) | Node.js, Express | ✅ |
 | [`web-admin/`](web-admin/) | Web cho Admin / Operator ([cách chạy](web-admin/README.md)) | ReactJS (Vite) | ✅ |
 | [`mobile-app/`](mobile-app/) | App cho khách hàng ([cách chạy, build APK](mobile-app/README.md)) | Flutter | ✅ |
-| [`app-customer/`](app-customer/) | Bản mẫu HTML/JS **chỉ để tham khảo** cho nhóm app (luồng màn hình, cách gọi API), không phải sản phẩm cuối | HTML, JS | 📎 |
 
 ## Chạy nhanh
 
