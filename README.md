@@ -19,6 +19,7 @@
 2. Chạy API: `backend/README.md`, kiểm tra bằng `npm run test:api`.
 3. Chạy web quản trị: `web-admin/README.md`.
 4. Chạy app khách hàng: `mobile-app/README.md` (`flutter run`, hoặc build file APK để cài lên điện thoại Android).
+   **Tải sẵn file APK:** [Releases → bản mới nhất](https://github.com/anh1856-dot/hqtcsdl/releases/latest) (kèm hướng dẫn cài).
 5. Web / app gọi API tại `http://localhost:3000/api`. Chạy app trên điện thoại thật thì dùng IP máy chạy backend thay cho `localhost`.
 
 Tài khoản mẫu: `admin@mushroomfarm.test`, `operator1@mushroomfarm.test`, `an.le@example.test`… mật khẩu chung `Mushroom@123` (chỉ dùng cho môi trường dev).
