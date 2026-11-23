@@ -26,17 +26,7 @@ Tài khoản mẫu: `admin@mushroomfarm.test`, `operator1@mushroomfarm.test`, `a
 
 ## Phạm vi đã thống nhất
 
-- Dùng **SQL Server** thay cho PostgreSQL ghi trong đề.
+- Dùng **SQL Server**.
 - **IoT giả lập** (`backend/scripts/simulate-iot.js`), không dùng ESP32 / cảm biến thật.
 - **Camera chỉ ở mức tham khảo:** web quản trị có phần cấu hình camera và URL stream, không nối camera / video thật.
 - **Thanh toán giả lập**, ghi nhận giao dịch thành công ngay.
-- Không làm tài liệu SRS/UML (giảng viên cho phép). Admin không tự đăng ký, tài khoản Admin tạo sẵn.
-- Đơn thuê hết hạn trước khi thu hoạch (**BR14**): xem mục 7 trong `backend/API.md`.
-
-## Quy tắc làm việc nhóm
-
-- **Không push thẳng lên `main`** (nhánh `main` đã bật bảo vệ, GitHub sẽ chặn). Mỗi việc tạo một nhánh (`feature/web-login`, `feature/app-tray-list`…) rồi mở Pull Request.
-- Nhóm trưởng review và merge. Mỗi người commit bằng tài khoản GitHub của mình.
-- Cần thêm/sửa bảng, cột, API → nhắn nhóm trưởng, không tự sửa `database/` và `backend/`.
-- Trước khi bắt đầu việc mới: `git pull` để lấy code mới nhất.
-- Không commit file `.env`, `node_modules/`, file build.
